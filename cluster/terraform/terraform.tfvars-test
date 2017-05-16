@@ -1,0 +1,31 @@
+# Cluster configuration
+cluster_prefix = "kevin-test" # Your cluster prefix
+kubenow_image = "ubuntu-16.04-20170113" # Name of the image created with Packer
+ssh_key = "~/.ssh/id_rsa.pub" # Path to your public SSH key to be used for ssh node access
+kubeadm_token = "1ba812.2a8fc00bc4bc5484"# You can run generate_kubetoken.sh to create a valid token
+floating_ip_pool = "ext-net"
+external_network_uuid = "b8fe95cc-70f2-468c-91a7-05c13c6aa19a" # The uuid of the external network in the OpenStack tenancy
+
+create_new_internal_network = false
+reuse_internal_network_name = "int-net-kevin2"
+reuse_secgroup_name = "kevin-all-open"
+
+# Customize the registry to download kubernetes images, default to gcr.io/google_containers
+kube_repo_prefix = "10.145.208.152:5000"
+
+# Choose a specific Kubernetes version for the control plane
+kubernetes_version = "v1.7.0-test392"
+
+swift_bucket="v1.7.0-test392"
+
+# Master configuration
+# obs: too small flavors might cause diffuse errors on your installation
+master_flavor = "m1.large"
+
+# Node configuration
+node_count = "2"
+node_flavor = "m1.medium"
+
+# Edge configuration
+edge_count = "0"
+edge_flavor = "m1.medium"
