@@ -830,34 +830,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		return
 	}
 
-	glog.V(3).Infof("Syncing ipvs kernel routes")
-
-	// Create and link the kube services chain.
-	{
-		tablesNeedServicesChain := []utiliptables.Table{utiliptables.TableNAT}
-		for _, table := range tablesNeedServicesChain {
-			if _, err := proxier.iptables.EnsureChain(table, kubeServicesChain); err != nil {
-				glog.Errorf("Failed to ensure that %s chain %s exists: %v", table, kubeServicesChain, err)
-				return
-			}
-		}
-
-		tableChainsNeedJumpServices := []struct {
-			table utiliptables.Table
-			chain utiliptables.Chain
-		}{
-			{utiliptables.TableNAT, utiliptables.ChainOutput},
-			{utiliptables.TableNAT, utiliptables.ChainPrerouting},
-		}
-		comment := "kubernetes service portals"
-		args := []string{"-m", "comment", "--comment", comment, "-j", string(kubeServicesChain)}
-		for _, tc := range tableChainsNeedJumpServices {
-			if _, err := proxier.iptables.EnsureRule(utiliptables.Prepend, tc.table, tc.chain, args...); err != nil {
-				glog.Errorf("Failed to ensure that %s chain %s jumps to %s: %v", tc.table, tc.chain, kubeServicesChain, err)
-				return
-			}
-		}
-	}
+	glog.V(3).Infof("Syncing ipvs rules")
 
 	// Create and link the kube postrouting chain.
 	{
@@ -896,11 +869,6 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 
 	// Make sure we keep stats for the top-level chains, if they existed
 	// (which most should have because we created them above).
-	if chain, ok := existingNATChains[kubeServicesChain]; ok {
-		writeLine(natChains, chain)
-	} else {
-		writeLine(natChains, utiliptables.MakeChainLine(kubeServicesChain))
-	}
 	if chain, ok := existingNATChains[kubePostroutingChain]; ok {
 		writeLine(natChains, chain)
 	} else {
@@ -930,25 +898,29 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		"-j", "MARK", "--set-xmark", proxier.masqueradeMark,
 	}...)
 
-	// Accumulate NAT chains to keep.
-	// activeNATChains := map[utiliptables.Chain]bool{} // use a map as a set
-
 	// Accumulate the set of local ports that we will be holding open once this update is complete
 	replacementPortsMap := map[localPort]closeable{}
 
 	activeServices := map[string]bool{}
 	currentServices := make(map[string]*utilipvs.Service)
 
-	// Build iptables SNAT rules for ipvs at first
-	args := []string{
-		"-A", string(kubeServicesChain),
-		"-m", "comment", "--comment", fmt.Sprintf(`"kubernetes service ipvs SNAT"`),
-	}
-	if proxier.masqueradeAll {
-		writeLine(natRules, append(args, "-j", string(KubeMarkMasqChain))...)
-	}
-	if len(proxier.clusterCIDR) > 0 {
-		writeLine(natRules, append(args, "! -s", proxier.clusterCIDR, "-j", string(KubeMarkMasqChain))...)
+	if proxier.masqueradeAll || len(proxier.clusterCIDR) > 0 {
+		proxier.ensureKubeServiceChain()
+		if chain, ok := existingNATChains[kubeServicesChain]; ok {
+			writeLine(natChains, chain)
+		} else {
+			writeLine(natChains, utiliptables.MakeChainLine(kubeServicesChain))
+		}
+		// Build iptables SNAT rules for ipvs at first
+		args := []string{
+			"-A", string(kubeServicesChain),
+			"-m", "comment", "--comment", fmt.Sprintf(`"kubernetes service ipvs SNAT"`),
+		}
+		if proxier.masqueradeAll {
+			writeLine(natRules, append(args, "-j", string(KubeMarkMasqChain))...)
+		} else {
+			writeLine(natRules, append(args, "! -s", proxier.clusterCIDR, "-j", string(KubeMarkMasqChain))...)
+		}
 	}
 
 	// Build rules for each service.
@@ -1036,8 +1008,17 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		// Capture load-balancer ingress.
 		for _, ingress := range svcInfo.loadBalancerStatus.Ingress {
 			if ingress.IP != "" {
+				// If have not created kube-services chain before, create it here
+				if !proxier.masqueradeAll && len(proxier.clusterCIDR) == 0 {
+					proxier.ensureKubeServiceChain()
+					if chain, ok := existingNATChains[kubeServicesChain]; ok {
+						writeLine(natChains, chain)
+					} else {
+						writeLine(natChains, utiliptables.MakeChainLine(kubeServicesChain))
+					}
+				}
 				args := []string{
-					"-A", string(kubeServicesChain),
+					"-I", string(kubeServicesChain),
 					"-m", "comment", "--comment", fmt.Sprintf(`"%s loadbalancer IP"`, svcNameString),
 					"-m", string(svcInfo.protocol), "-p", string(svcInfo.protocol),
 					"-d", fmt.Sprintf("%s/32", ingress.IP),
@@ -1192,6 +1173,29 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	// TODO: these and clearUDPConntrackForPort() could be made more consistent.
 	utilproxy.DeleteServiceConnections(proxier.exec, staleServices.List())
 	proxier.deleteEndpointConnections(staleEndpoints)
+}
+
+func (proxier *Proxier) ensureKubeServiceChain() {
+	if _, err := proxier.iptables.EnsureChain(utiliptables.TableNAT, kubeServicesChain); err != nil {
+		glog.Errorf("Failed to ensure that %s chain %s exists: %v", utiliptables.TableNAT, kubeServicesChain, err)
+		return
+	}
+
+	tableChainsNeedJumpServices := []struct {
+		table utiliptables.Table
+		chain utiliptables.Chain
+	}{
+		{utiliptables.TableNAT, utiliptables.ChainOutput},
+		{utiliptables.TableNAT, utiliptables.ChainPrerouting},
+	}
+	comment := "kubernetes service portals"
+	args := []string{"-m", "comment", "--comment", comment, "-j", string(kubeServicesChain)}
+	for _, tc := range tableChainsNeedJumpServices {
+		if _, err := proxier.iptables.EnsureRule(utiliptables.Prepend, tc.table, tc.chain, args...); err != nil {
+			glog.Errorf("Failed to ensure that %s chain %s jumps to %s: %v", tc.table, tc.chain, kubeServicesChain, err)
+			return
+		}
+	}
 }
 
 // Clear UDP conntrack for port or all conntrack entries when port equal zero.
