@@ -41,8 +41,6 @@ import (
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 	utilipvs "k8s.io/kubernetes/pkg/util/ipvs"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
-
-	"github.com/google/seesaw/ipvs"
 )
 
 const (
@@ -58,10 +56,6 @@ const (
 	// the mark-for-drop chain
 	KubeMarkDropChain utiliptables.Chain = "KUBE-MARK-DROP"
 )
-
-type IpvsSchedulerType string
-
-const defaultIpvsScheduler = "rr"
 
 const sysctlRouteLocalnet = "net/ipv4/conf/all/route_localnet"
 const sysctlBridgeCallIPTables = "net/bridge/bridge-nf-call-iptables"
@@ -103,7 +97,7 @@ type Proxier struct {
 	healthChecker  healthcheck.Server
 	healthzServer  healthcheck.HealthzUpdater
 	ipvs           utilipvs.Interface
-	ipvsScheduler  IpvsSchedulerType
+	ipvsScheduler  string
 }
 
 // Proxier implements ProxyProvider
@@ -172,7 +166,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 	}
 
 	if len(scheduler) == 0 {
-		scheduler = defaultIpvsScheduler
+		scheduler = utilipvs.DefaultIpvsScheduler
 	}
 
 	return &Proxier{
@@ -196,7 +190,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		healthChecker:    healthChecker,
 		healthzServer:    healthzServer,
 		ipvs:             ipvs,
-		ipvsScheduler:    IpvsSchedulerType(scheduler),
+		ipvsScheduler:    scheduler,
 	}, nil
 }
 
@@ -280,7 +274,7 @@ func CleanupIptablesLeftovers(ipt utiliptables.Interface) (encounteredError bool
 func CleanupLeftovers(ipvs utilipvs.Interface, ipt utiliptables.Interface) (encounteredError bool) {
 	encounteredError = false
 	err := ipvs.Flush()
-	err = ipvs.DeleteAliasDevice("ipvs0")
+	err = ipvs.DeleteAliasDevice(utilipvs.AliasDevice)
 	encounteredError = CleanupIptablesLeftovers(ipt)
 	if err != nil {
 		encounteredError = true
@@ -542,12 +536,12 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 			Address:   svcInfo.ClusterIP,
 			Port:      uint16(svcInfo.Port),
 			Protocol:  string(svcInfo.Protocol),
-			Scheduler: string(proxier.ipvsScheduler),
+			Scheduler: proxier.ipvsScheduler,
 		}
 		// Build session affinity flag for ipvs at first
-		var ipvsFlags ipvs.ServiceFlags
+		var ipvsFlags utilipvs.ServiceFlags
 		if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
-			ipvsFlags |= ipvs.SFPersistent
+			ipvsFlags |= utilipvs.SFPersistent
 			serv.Flags = uint32(ipvsFlags)
 			serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
 		}
@@ -598,7 +592,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 				Port:      uint16(svcInfo.Port),
 				Protocol:  string(svcInfo.Protocol),
 				Flags:     uint32(ipvsFlags),
-				Scheduler: string(proxier.ipvsScheduler),
+				Scheduler: proxier.ipvsScheduler,
 			}
 			if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 				serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
@@ -661,7 +655,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 					Port:      uint16(svcInfo.Port),
 					Protocol:  string(svcInfo.Protocol),
 					Flags:     uint32(ipvsFlags),
-					Scheduler: string(proxier.ipvsScheduler),
+					Scheduler: proxier.ipvsScheduler,
 				}
 				if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 					serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
@@ -709,7 +703,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 						Port:      uint16(svcInfo.NodePort),
 						Protocol:  string(svcInfo.Protocol),
 						Flags:     uint32(ipvsFlags),
-						Scheduler: string(proxier.ipvsScheduler),
+						Scheduler: proxier.ipvsScheduler,
 					}
 					if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 						serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
@@ -752,17 +746,13 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	proxier.portsMap = replacementPortsMap
 
 	// Clean up legacy ipvs service
-	svcIntfs, err := proxier.ipvs.GetServices()
+	appliedSvcs, err := proxier.ipvs.GetServices()
 	if err == nil {
-		for _, svcIntf := range svcIntfs {
-			appliedSvc, err := svcIntf.GetService()
-			if err != nil {
-				glog.Errorf("Failed to get ipvs service, err: %v", err)
-			} else {
-				currentServices[appliedSvc.Address.String()+":"+fmt.Sprintf("%d", appliedSvc.Port)+"/"+appliedSvc.Protocol] = appliedSvc
-			}
-
+		for _, appliedSvc := range appliedSvcs {
+			currentServices[appliedSvc.Address.String()+":"+fmt.Sprintf("%d", appliedSvc.Port)+"/"+appliedSvc.Protocol] = appliedSvc
 		}
+	} else {
+		glog.Errorf("Failed to get ipvs service, err: %v", err)
 	}
 	proxier.cleanLegacyService(activeServices, currentServices)
 
@@ -864,19 +854,14 @@ func getNodeIPs() (ips []net.IP, err error) {
 
 func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, alias bool) error {
 	var appliedSvc *utilipvs.Service
-	svcIntf, err := proxier.ipvs.GetService(ipvsSvc)
-	if err == nil {
-		appliedSvc, err = svcIntf.GetService()
-		if err != nil {
-			glog.Errorf("Failed to get ipvs service, err: %v", err)
-		}
-	}
+	appliedSvc, _ = proxier.ipvs.GetService(ipvsSvc)
+
 	// ipvs service not found or has changed
 	if appliedSvc == nil || !appliedSvc.Equal(ipvsSvc) {
 		if appliedSvc == nil {
 			glog.V(3).Infof("Adding new service %q at %s:%d/%s", svcName, ipvsSvc.Address, ipvsSvc.Port, ipvsSvc.Protocol)
 			if alias {
-				err = proxier.ipvs.SetAlias(ipvsSvc)
+				err := proxier.ipvs.SetAlias(ipvsSvc)
 				if err != nil {
 					glog.Errorf("Failed to set VIP alias to network device %q: %v", svcName, err)
 					return err
@@ -890,7 +875,7 @@ func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, a
 				return err
 			}
 		}
-		err = proxier.ipvs.AddService(ipvsSvc)
+		err := proxier.ipvs.AddService(ipvsSvc)
 		if err != nil {
 			glog.Errorf("Failed to add Service for %q: %v", svcName, err)
 			return err
@@ -900,11 +885,12 @@ func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, a
 }
 
 func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNodeLocalEndpoints bool, ipvsSvc *utilipvs.Service) error {
-	applied, err := proxier.ipvs.GetService(ipvsSvc)
-	if err != nil || applied == nil {
+	svc, err := proxier.ipvs.GetService(ipvsSvc)
+	if err != nil || svc == nil {
 		return err
 	}
-	dests, err := applied.GetDestinations()
+
+	dests, err := proxier.ipvs.GetDestinations(svc)
 	if err != nil {
 		glog.Errorf("Failed to get ipvs service destinations, err: %v", err)
 		return err
@@ -935,7 +921,7 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 				Weight:  1,
 			}
 
-			err := applied.AddDestination(newDest)
+			err := proxier.ipvs.AddDestination(svc, newDest)
 			if err != nil {
 				if !strings.Contains(err.Error(), "object exists") {
 					glog.Errorf("Error: Cannot add destination: %v, error: %v", newDest, err)
@@ -952,7 +938,7 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 				Port:    uint16(port),
 			}
 			glog.V(6).Infof("Endpoints: [%v] will be deleted", delDest)
-			err := applied.DeleteDestination(delDest)
+			err := proxier.ipvs.DeleteDestination(svc, delDest)
 			if err != nil {
 				glog.Errorf("Error: Cannot delete destination: %v, error: %v", delDest, err)
 			}

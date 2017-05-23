@@ -25,9 +25,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/docker/libnetwork/ipvs"
 	godbus "github.com/godbus/dbus"
 	"github.com/golang/glog"
-	"github.com/google/seesaw/ipvs"
 	utildbus "k8s.io/kubernetes/pkg/util/dbus"
 	utilexec "k8s.io/kubernetes/pkg/util/exec"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
@@ -45,10 +45,6 @@ const (
 	ipvsSvcFlagPersist   = 0x1
 	ipvsSvcFlagHashed    = 0x2
 	ipvsSvcFlagOnePacket = 0x4
-
-	SFPersistent uint32 = ipvsSvcFlagPersist
-	SFHashed     uint32 = ipvsSvcFlagHashed
-	SFOnePacket  uint32 = ipvsSvcFlagOnePacket
 )
 
 // Replica of IPVS Service.
@@ -66,27 +62,14 @@ func (svc *Service) Equal(other *Service) bool {
 		svc.Protocol == other.Protocol &&
 		svc.Port == other.Port &&
 		svc.Scheduler == other.Scheduler &&
-		svc.Flags == other.Flags &&
 		svc.Timeout == other.Timeout
-}
-
-type ipvsServiceHandler struct {
-	*ipvs.Service
-}
-
-type ServiceInterface interface {
-	GetService() (*Service, error)
-	AddDestination(*Destination) error
-	GetDestinations() ([]*Destination, error)
-	UpdateDestination(*Destination) error
-	DeleteDestination(*Destination) error
 }
 
 //Replica of IPVS Destination
 type Destination struct {
 	Address net.IP
 	Port    uint16
-	Weight  int32
+	Weight  int
 }
 
 var ipvsModules = []string{
@@ -97,7 +80,19 @@ var ipvsModules = []string{
 	"nf_conntrack_ipv4",
 }
 
-var aliasDevice string = "ipvs0"
+const AliasDevice = "kube0"
+const cmd = "ip"
+
+const (
+	SFPersistent ServiceFlags = ipvsSvcFlagPersist
+	SFHashed     ServiceFlags = ipvsSvcFlagHashed
+	SFOnePacket  ServiceFlags = ipvsSvcFlagOnePacket
+)
+
+// ServiceFlags specifies the flags for a IPVS service.
+type ServiceFlags uint32
+
+const DefaultIpvsScheduler = "rr"
 
 // An injectable interface for running iptables commands.  Implementations must be goroutine-safe.
 type Interface interface {
@@ -106,15 +101,19 @@ type Interface interface {
 	DeleteAliasDevice(aliasDev string) error
 	SetAlias(serv *Service) error
 	UnSetAlias(serv *Service) error
-	GetVersion() string
 	AddService(*Service) error
 	UpdateService(*Service) error
 	DeleteService(*Service) error
-	GetService(*Service) (ServiceInterface, error)
-	GetServices() ([]ServiceInterface, error)
+	GetService(*Service) (*Service, error)
+	GetServices() ([]*Service, error)
 	AddReloadFunc(reloadFunc func())
 	Flush() error
 	Destroy()
+
+	AddDestination(*Service, *Destination) error
+	GetDestinations(*Service) ([]*Destination, error)
+	UpdateDestination(*Service, *Destination) error
+	DeleteDestination(*Service, *Destination) error
 }
 
 type Protocol byte
@@ -185,9 +184,13 @@ func (runner *runner) connectToFirewallD() {
 }
 
 // GetVersion returns the version string.
-func (runner *runner) GetVersion() string {
+/*func (runner *runner) GetVersion() string {
 	return ipvs.Version().String()
-}
+}*/
+
+var ipvs_handle *ipvs.Handle
+
+type IPProto uint16
 
 func (runner *runner) InitIpvsInterface() error {
 	glog.V(6).Infof("Preparation for ipvs")
@@ -209,28 +212,29 @@ func (runner *runner) InitIpvsInterface() error {
 		return err
 	}
 
-	if err := runner.CreateAliasDevice(aliasDevice); err != nil {
+	if err := runner.CreateAliasDevice(AliasDevice); err != nil {
 		glog.Errorf("createAliasDevice: Alias network device cannot be created. Error: %v", err)
 		return err
 	}
 
-	if err := ipvs.Init(); err != nil {
+	var err error
+	if ipvs_handle, err = ipvs.New(""); err != nil {
+		glog.Errorf("InitIpvsInterface: Ipvs cannot be Inited. Error: %v", err)
 		return err
-
 	}
 
 	return nil
 }
 
-func ToProtocolNumber(protocol string) ipvs.IPProto {
+func ToProtocolNumber(protocol string) uint16 {
 	switch strings.ToLower(protocol) {
 	case "tcp":
-		return ipvs.IPProto(syscall.IPPROTO_TCP)
+		return uint16(syscall.IPPROTO_TCP)
 	case "udp":
-		return ipvs.IPProto(syscall.IPPROTO_UDP)
+		return uint16(syscall.IPPROTO_UDP)
 	}
 
-	return ipvs.IPProto(0)
+	return uint16(0)
 }
 
 func (runner *runner) AddService(svc *Service) error {
@@ -238,13 +242,7 @@ func (runner *runner) AddService(svc *Service) error {
 		svc.Scheduler = DefaultIPVSScheduler
 	}
 
-	return ipvs.AddService(ipvs.Service{
-		Address:   svc.Address,
-		Port:      svc.Port,
-		Protocol:  ToProtocolNumber(svc.Protocol),
-		Scheduler: svc.Scheduler,
-		Flags:     ipvs.ServiceFlags(svc.Flags),
-	})
+	return ipvs_handle.NewService(NewIpvsService(svc))
 }
 
 //Empty Implementation
@@ -253,24 +251,16 @@ func (runner *runner) UpdateService(svc *Service) error {
 }
 
 func (runner *runner) DeleteService(svc *Service) error {
-	return ipvs.DeleteService(ipvs.Service{
-		Address:  svc.Address,
-		Port:     svc.Port,
-		Protocol: ToProtocolNumber(svc.Protocol),
-	})
+
+	return ipvs_handle.DelService(NewIpvsService(svc))
 }
 
 func (runner *runner) CreateAliasDevice(aliasDev string) error {
 
-	if aliasDev == aliasDevice {
-		cmd := "ip"
-
-		//
+	if aliasDev == AliasDevice {
 		// Generate device alias
-		//
 		args := []string{"link", "add", aliasDev, "type", "dummy"}
 		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-
 			// "exit status 2" is returned from the above run command if the device already exists
 			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 				glog.Errorf("Error: Cannot create alias network device: %s", aliasDev)
@@ -287,12 +277,8 @@ func (runner *runner) CreateAliasDevice(aliasDev string) error {
 }
 
 func (runner *runner) DeleteAliasDevice(aliasDev string) error {
-	if aliasDev == aliasDevice {
-		cmd := "ip"
-
-		//
+	if aliasDev == AliasDevice {
 		// Delete device alias
-		//
 		args := []string{"link", "del", aliasDev}
 		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
 			// "exit status 2" is returned from the above run command if the device don't exists
@@ -321,17 +307,13 @@ func (runner *runner) setSystemFlagInt(sysControl string, value int) error {
 
 func (runner *runner) SetAlias(serv *Service) error {
 	// TODO:  Hard code command to config aliases to network device
-	//
-	cmd := "ifconfig"
 
-	//
 	// Generate device alias
-	//
-	alias := aliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{alias, serv.Address.String(), "up"}
+	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
+	args := []string{"addr", "add", serv.Address.String(), "dev", AliasDevice, "label", alias}
 	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 255" is returned from the above run command if the alias exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 255") {
+		// "exit status 2" is returned from the above run command if the alias exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 			glog.Errorf("Error: Cannot create alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
 			return err
 		}
@@ -342,17 +324,13 @@ func (runner *runner) SetAlias(serv *Service) error {
 
 func (runner *runner) UnSetAlias(serv *Service) error {
 	// TODO:  Hard code command to config aliases to network device
-	//
-	cmd := "ifconfig"
 
-	//
 	// Unset device alias
-	//
-	alias := aliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{alias, "down"}
+	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
+	args := []string{"addr", "del", serv.Address.String(), "dev", AliasDevice, "label", alias}
 	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 255" is returned from the above run command if the alias is not exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 255") {
+		// "exit status 2" is returned from the above run command if the alias is not exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 			glog.Errorf("Error: Cannot unset alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
 			return err
 		}
@@ -415,47 +393,58 @@ func (runner *runner) reload() {
 	}
 }
 
-func (runner *runner) GetService(svc *Service) (ServiceInterface, error) {
-	ipvsService, err := ipvs.GetService(&ipvs.Service{
-		Address:  svc.Address,
-		Port:     svc.Port,
-		Protocol: ToProtocolNumber(svc.Protocol),
-	})
+func (runner *runner) GetService(svc *Service) (*Service, error) {
+	ipvsService, err := ipvs_handle.GetService(NewIpvsService(svc))
 	if err != nil {
 		return nil, err
 	}
-
-	return &ipvsServiceHandler{Service: ipvsService}, nil
+	var rsvc *Service
+	rsvc, err = toService(ipvsService)
+	if err != nil {
+		return nil, err
+	}
+	return rsvc, nil
 }
 
-func (runner *runner) GetServices() ([]ServiceInterface, error) {
-	ipvsServices, err := ipvs.GetServices()
+func (runner *runner) GetServices() ([]*Service, error) {
+	ipvsServices, err := ipvs_handle.GetServices()
 	if err != nil {
 		return nil, err
 	}
 
-	svcs := make([]ServiceInterface, 0)
-	for _, svc := range ipvsServices {
-		svcs = append(svcs, &ipvsServiceHandler{Service: svc})
+	svcs := make([]*Service, 0)
+
+	for _, ipvsService := range ipvsServices {
+		svc, err := toService(ipvsService)
+		if err != nil {
+			return nil, err
+		}
+		svcs = append(svcs, svc)
 	}
 
 	return svcs, nil
 }
 
 func (runner *runner) Flush() error {
-	return ipvs.Flush()
+	Services, err := runner.GetServices()
+	if err != nil {
+		return err
+	}
+	for _, service := range Services {
+		err := runner.DeleteService(service)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (svcHandler *ipvsServiceHandler) AddDestination(dst *Destination) error {
-	if svcHandler.Service == nil {
+func (runner *runner) AddDestination(svc *Service, dst *Destination) error {
+	if svc == nil {
 		return errors.New("Invalid Service Interface")
 	}
 
-	err := ipvs.AddDestination(*svcHandler.Service, ipvs.Destination{
-		Address: dst.Address,
-		Port:    dst.Port,
-		Weight:  dst.Weight,
-	})
+	err := ipvs_handle.NewDestination(NewIpvsService(svc), NewIPVSDestination(dst))
 	if err != nil {
 		if !strings.Contains(err.Error(), "object exists") {
 			glog.Errorf("Error: Cannot add destination: %v, error: %v", dst, err)
@@ -468,53 +457,115 @@ func (svcHandler *ipvsServiceHandler) AddDestination(dst *Destination) error {
 }
 
 //Empty Implementation
-func (svcHandler *ipvsServiceHandler) UpdateDestination(dst *Destination) error {
-	if svcHandler.Service == nil {
+func (runner *runner) UpdateDestination(svc *Service, dst *Destination) error {
+	if svc == nil {
 		return errors.New("Invalid Service Interface")
 	}
 	return nil
 }
 
-func (svcHandler *ipvsServiceHandler) DeleteDestination(dst *Destination) error {
-	if svcHandler.Service == nil {
+func (runner *runner) DeleteDestination(svc *Service, dst *Destination) error {
+	if svc == nil {
 		return errors.New("Invalid Service Interface")
 	}
 
-	return ipvs.DeleteDestination(*svcHandler.Service, ipvs.Destination{
-		Address: dst.Address,
-		Port:    dst.Port,
-		Weight:  dst.Weight,
-	})
+	return ipvs_handle.DelDestination(NewIpvsService(svc), NewIPVSDestination(dst))
 }
 
-func (svcHandler *ipvsServiceHandler) GetDestinations() ([]*Destination, error) {
-	if svcHandler.Service == nil {
+func (runner *runner) GetDestinations(svc *Service) ([]*Destination, error) {
+	if svc == nil {
 		return nil, errors.New("Invalid Service Interface")
 	}
 
 	destinations := make([]*Destination, 0)
 
-	for _, dest := range svcHandler.Destinations {
-		destinations = append(destinations, &Destination{
-			Address: dest.Address,
-			Port:    dest.Port,
-			Weight:  dest.Weight,
-		})
+	Destinations, err := ipvs_handle.GetDestinations(NewIpvsService(svc))
+
+	if err != nil {
+		glog.Errorf("Error: Failed to  Getdestination for Service: %v, error: %v", svc, err)
+		return nil, err
+	}
+
+	for _, dest := range Destinations {
+		dst, err := toDestination(dest)
+		if err != nil {
+			return nil, err
+		}
+		destinations = append(destinations, dst)
 	}
 
 	glog.V(6).Infof("Destinations: [%+v] return", destinations)
 	return destinations, nil
 }
 
-func (svcHandler *ipvsServiceHandler) GetService() (*Service, error) {
-	if svcHandler.Service == nil {
+// toService converts a service entry from its IPVS representation to the Go
+// equivalent Service structure.
+func toService(svc *ipvs.Service) (*Service, error) {
+	if svc == nil {
 		return nil, errors.New("Invalid Service Interface")
 	}
 
 	return &Service{
-		Address:   svcHandler.Address,
-		Port:      svcHandler.Port,
-		Scheduler: svcHandler.Scheduler,
-		Protocol:  svcHandler.Protocol.String(),
+		Address:   svc.Address,
+		Port:      svc.Port,
+		Scheduler: svc.SchedName,
+		Protocol:  String(IPProto(svc.Protocol)),
+		Flags:     svc.Flags,
+		Timeout:   svc.Timeout,
 	}, nil
+}
+
+// toDestination converts a destination entry from its IPVS representation
+// to the Go equivalent Destination structure.
+func toDestination(ipvsDst *ipvs.Destination) (*Destination, error) {
+	if ipvsDst == nil {
+		return nil, errors.New("Invalid ipvsDst Interface")
+	}
+	dst := &Destination{
+		Address: ipvsDst.Address,
+		Port:    ipvsDst.Port,
+		Weight:  ipvsDst.Weight,
+	}
+
+	return dst, nil
+}
+
+// newIPVSService converts a service to its IPVS representation.
+func NewIpvsService(svc *Service) *ipvs.Service {
+	ipvsSvc := &ipvs.Service{
+		Address:   svc.Address,
+		Protocol:  ToProtocolNumber(svc.Protocol),
+		Port:      svc.Port,
+		SchedName: svc.Scheduler,
+		Flags:     svc.Flags,
+		Timeout:   svc.Timeout,
+	}
+	if ip4 := svc.Address.To4(); ip4 != nil {
+		ipvsSvc.AddressFamily = syscall.AF_INET
+		ipvsSvc.Netmask = 0xffffffff
+	} else {
+		ipvsSvc.AddressFamily = syscall.AF_INET6
+		ipvsSvc.Netmask = 128
+	}
+	return ipvsSvc
+}
+
+// newIPVSDestination converts a destination to its IPVS representation.
+func NewIPVSDestination(dst *Destination) *ipvs.Destination {
+	return &ipvs.Destination{
+		Address: dst.Address,
+		Port:    dst.Port,
+		Weight:  dst.Weight,
+	}
+}
+
+// String returns the name for the given protocol value.
+func String(proto IPProto) string {
+	switch proto {
+	case syscall.IPPROTO_TCP:
+		return "TCP"
+	case syscall.IPPROTO_UDP:
+		return "UDP"
+	}
+	return fmt.Sprintf("IP(%d)", proto)
 }
