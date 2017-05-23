@@ -441,7 +441,7 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 		glog.V(0).Info("Tearing down userspace rules.")
 		// TODO this has side effects that should only happen when Run() is invoked.
 		userspace.CleanupLeftovers(iptInterface)
-		ipvs.CleanupIpvsLeftovers(ipvsInterface, iptInterface)
+		ipvs.CleanupLeftovers(ipvsInterface, iptInterface)
 	} else if proxyMode == proxyModeIPVS {
 		glog.V(0).Info("Using ipvs Proxier.")
 		// TODO this has side effects that should only happen when Run() is invoked.
@@ -524,7 +524,7 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 			glog.V(0).Info("Tearing down pure-iptables proxy rules.")
 			// TODO this has side effects that should only happen when Run() is invoked.
 			iptables.CleanupLeftovers(iptInterface)
-			ipvs.CleanupIpvsLeftovers(ipvsInterface, iptInterface)
+			ipvs.CleanupLeftovers(ipvsInterface, iptInterface)
 		}
 	}
 
@@ -569,7 +569,7 @@ func (s *ProxyServer) Run() error {
 	if s.CleanupAndExit {
 		encounteredError := userspace.CleanupLeftovers(s.IptInterface)
 		encounteredError = iptables.CleanupLeftovers(s.IptInterface) || encounteredError
-		encounteredError = ipvs.CleanupIpvsLeftovers(s.IpvsInterface, s.IptInterface) || encounteredError
+		encounteredError = ipvs.CleanupLeftovers(s.IpvsInterface, s.IptInterface) || encounteredError
 		if encounteredError {
 			return errors.New("encountered an error while tearing down rules.")
 		}
