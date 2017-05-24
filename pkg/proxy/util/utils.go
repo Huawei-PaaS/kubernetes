@@ -2,6 +2,7 @@ package util
 
 import (
 	"net"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -41,4 +42,21 @@ func ShouldSkipService(svcName types.NamespacedName, service *api.Service) bool 
 		return true
 	}
 	return false
+}
+
+func getLocalIPs(endpointsMap ProxyEndpointsMap) map[types.NamespacedName]sets.String {
+	localIPs := make(map[types.NamespacedName]sets.String)
+	for svcPort := range endpointsMap {
+		for _, ep := range endpointsMap[svcPort] {
+			if ep.IsLocal {
+				nsn := svcPort.NamespacedName
+				if localIPs[nsn] == nil {
+					localIPs[nsn] = sets.NewString()
+				}
+				ip := strings.Split(ep.Endpoint, ":")[0] // just the IP part
+				localIPs[nsn].Insert(ip)
+			}
+		}
+	}
+	return localIPs
 }
