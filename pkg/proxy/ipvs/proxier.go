@@ -57,8 +57,6 @@ const (
 	KubeMarkDropChain utiliptables.Chain = "KUBE-MARK-DROP"
 )
 
-type IpvsSchedulerType string
-
 const sysctlRouteLocalnet = "net/ipv4/conf/all/route_localnet"
 const sysctlBridgeCallIPTables = "net/bridge/bridge-nf-call-iptables"
 
@@ -99,7 +97,7 @@ type Proxier struct {
 	healthChecker  healthcheck.Server
 	healthzServer  healthcheck.HealthzUpdater
 	ipvs           utilipvs.Interface
-	ipvsScheduler  IpvsSchedulerType
+	ipvsScheduler  string
 }
 
 // Proxier implements ProxyProvider
@@ -192,7 +190,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		healthChecker:    healthChecker,
 		healthzServer:    healthzServer,
 		ipvs:             ipvs,
-		ipvsScheduler:    IpvsSchedulerType(scheduler),
+		ipvsScheduler:    scheduler,
 	}, nil
 }
 
@@ -538,7 +536,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 			Address:   svcInfo.ClusterIP,
 			Port:      uint16(svcInfo.Port),
 			Protocol:  string(svcInfo.Protocol),
-			Scheduler: string(proxier.ipvsScheduler),
+			Scheduler: proxier.ipvsScheduler,
 		}
 		// Build session affinity flag for ipvs at first
 		var ipvsFlags utilipvs.ServiceFlags
@@ -594,7 +592,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 				Port:      uint16(svcInfo.Port),
 				Protocol:  string(svcInfo.Protocol),
 				Flags:     uint32(ipvsFlags),
-				Scheduler: string(proxier.ipvsScheduler),
+				Scheduler: proxier.ipvsScheduler,
 			}
 			if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 				serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
@@ -657,7 +655,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 					Port:      uint16(svcInfo.Port),
 					Protocol:  string(svcInfo.Protocol),
 					Flags:     uint32(ipvsFlags),
-					Scheduler: string(proxier.ipvsScheduler),
+					Scheduler: proxier.ipvsScheduler,
 				}
 				if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 					serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)
@@ -705,7 +703,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 						Port:      uint16(svcInfo.NodePort),
 						Protocol:  string(svcInfo.Protocol),
 						Flags:     uint32(ipvsFlags),
-						Scheduler: string(proxier.ipvsScheduler),
+						Scheduler: proxier.ipvsScheduler,
 					}
 					if svcInfo.SessionAffinityType == api.ServiceAffinityClientIP {
 						serv.Timeout = uint32(svcInfo.StickyMaxAgeMinutes * 60)

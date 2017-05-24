@@ -81,6 +81,7 @@ var ipvsModules = []string{
 }
 
 const AliasDevice = "kube0"
+const cmd = "ip"
 
 const (
 	SFPersistent ServiceFlags = ipvsSvcFlagPersist
@@ -257,14 +258,9 @@ func (runner *runner) DeleteService(svc *Service) error {
 func (runner *runner) CreateAliasDevice(aliasDev string) error {
 
 	if aliasDev == AliasDevice {
-		cmd := "ip"
-
-		//
 		// Generate device alias
-		//
 		args := []string{"link", "add", aliasDev, "type", "dummy"}
 		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-
 			// "exit status 2" is returned from the above run command if the device already exists
 			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 				glog.Errorf("Error: Cannot create alias network device: %s", aliasDev)
@@ -282,11 +278,7 @@ func (runner *runner) CreateAliasDevice(aliasDev string) error {
 
 func (runner *runner) DeleteAliasDevice(aliasDev string) error {
 	if aliasDev == AliasDevice {
-		cmd := "ip"
-
-		//
 		// Delete device alias
-		//
 		args := []string{"link", "del", aliasDev}
 		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
 			// "exit status 2" is returned from the above run command if the device don't exists
@@ -315,17 +307,13 @@ func (runner *runner) setSystemFlagInt(sysControl string, value int) error {
 
 func (runner *runner) SetAlias(serv *Service) error {
 	// TODO:  Hard code command to config aliases to network device
-	//
-	cmd := "ifconfig"
 
-	//
 	// Generate device alias
-	//
 	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{alias, serv.Address.String(), "up"}
+	args := []string{"addr", "add", serv.Address.String(), "dev", AliasDevice, "label", alias}
 	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 255" is returned from the above run command if the alias exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 255") {
+		// "exit status 2" is returned from the above run command if the alias exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 			glog.Errorf("Error: Cannot create alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
 			return err
 		}
@@ -336,17 +324,13 @@ func (runner *runner) SetAlias(serv *Service) error {
 
 func (runner *runner) UnSetAlias(serv *Service) error {
 	// TODO:  Hard code command to config aliases to network device
-	//
-	cmd := "ifconfig"
 
-	//
 	// Unset device alias
-	//
 	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{alias, "down"}
+	args := []string{"addr", "del", serv.Address.String(), "dev", AliasDevice, "label", alias}
 	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 255" is returned from the above run command if the alias is not exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 255") {
+		// "exit status 2" is returned from the above run command if the alias is not exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
 			glog.Errorf("Error: Cannot unset alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
 			return err
 		}
