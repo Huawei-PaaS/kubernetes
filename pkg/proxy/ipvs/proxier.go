@@ -60,6 +60,18 @@ const (
 const sysctlRouteLocalnet = "net/ipv4/conf/all/route_localnet"
 const sysctlBridgeCallIPTables = "net/bridge/bridge-nf-call-iptables"
 
+// In "ipvs" proxy mode, the following two flags need to be set
+const sysctlVsConnTrack = "net/ipv4/vs/conntrack"
+const sysctlForward     = "net/ipv4/ip_forward"
+
+var ipvsModules = []string{
+	"ip_vs",
+	"ip_vs_rr",
+	"ip_vs_wrr",
+	"ip_vs_sh",
+	"nf_conntrack_ipv4",
+}
+
 // Proxier is an ipvs based proxy for connections between a localhost:lport
 // and services that provide the actual backends.
 type Proxier struct {
@@ -98,8 +110,9 @@ type Proxier struct {
 	healthzServer  healthcheck.HealthzUpdater
 	ipvs           utilipvs.Interface
 	ipvsScheduler  string
-	// inject it, for test purpose
-	IPGetter IPGetter
+	// IPGetter help get node interface IP
+	// Added as a member to the struct to allow injection for testing.
+	ipGetter IPGetter
 }
 
 type IPGetter interface {
@@ -177,6 +190,26 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		glog.Infof("missing br-netfilter module or unset sysctl br-nf-call-iptables; proxy may not work as intended")
 	}
 
+	// The system command "modeprobe" is hard coded here.
+	for _, module := range ipvsModules {
+		_, err := exec.Command("modprobe", module).CombinedOutput()
+		if err != nil {
+			glog.Warningf("Warning: Can not load module: %s in lvs proxier", module)
+		}
+	}
+
+	// Set sysctl flags for ipvs
+	if err := sysctl.SetSysctl(sysctlVsConnTrack, 1); err != nil {
+		return nil, fmt.Errorf("can't set sysctl %s: %v", sysctlVsConnTrack, err)
+	}
+	if err := sysctl.SetSysctl(sysctlForward, 1); err != nil {
+		return nil, fmt.Errorf("can't set sysctl %s: %v", sysctlForward, err)
+	}
+
+	if err := ipvs.CreateAliasDevice(utilipvs.AliasDevice); err != nil {
+		return  nil, fmt.Errorf("Alias device cannot be created: %v", err)
+	}
+
 	// Generate the masquerade mark to use for SNAT rules.
 	if masqueradeBit < 0 || masqueradeBit > 31 {
 		return nil, fmt.Errorf("invalid iptables-masquerade-bit %v not in [0, 31]", masqueradeBit)
@@ -194,7 +227,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 	}
 
 	if masqueradeAll == false {
-		glog.Warningf("masqueradeAll not specified, unable to do snat for ipvs proxy. It may cause break cross host traffic")
+		glog.Warningf("masqueradeAll not specified, unable to do snat for ipvs proxy. It may break cross host traffic")
 	}
 
 	healthChecker := healthcheck.NewServer(hostname, recorder, nil, nil) // use default implementations of deps
@@ -233,7 +266,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		healthzServer:    healthzServer,
 		ipvs:             ipvs,
 		ipvsScheduler:    scheduler,
-		IPGetter:         &realIPGetter{},
+		ipGetter:         &realIPGetter{},
 	}, nil
 }
 
@@ -295,18 +328,6 @@ func CleanupIptablesLeftovers(ipt utiliptables.Interface) (encounteredError bool
 		err = ipt.Restore(utiliptables.TableNAT, natLines, utiliptables.NoFlushTables, utiliptables.RestoreCounters)
 		if err != nil {
 			glog.Errorf("Failed to execute iptables-restore for %s: %v", utiliptables.TableNAT, err)
-			encounteredError = true
-		}
-	}
-	{
-		filterBuf := bytes.NewBuffer(nil)
-		writeLine(filterBuf, "*filter")
-		writeLine(filterBuf, fmt.Sprintf(":%s - [0:0]", kubeServicesChain))
-		writeLine(filterBuf, fmt.Sprintf("-X %s", kubeServicesChain))
-		writeLine(filterBuf, "COMMIT")
-		// Write it.
-		if err := ipt.Restore(utiliptables.TableFilter, filterBuf.Bytes(), utiliptables.NoFlushTables, utiliptables.RestoreCounters); err != nil {
-			glog.Errorf("Failed to execute iptables-restore for %s: %v", utiliptables.TableFilter, err)
 			encounteredError = true
 		}
 	}
@@ -520,6 +541,12 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		"-j", "MARK", "--set-xmark", proxier.masqueradeMark,
 	}...)
 
+	err = proxier.ipvs.CheckAliasDevice(utilipvs.AliasDevice)
+	if err != nil {
+		glog.Errorf("Failed to create aliasDevice: %v", err)
+		return
+	}
+
 	// Accumulate the set of local ports that we will be holding open once this update is complete
 	replacementPortsMap := map[utilproxy.LocalPort]utilproxy.Closeable{}
 
@@ -715,7 +742,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 			} // We're holding the port, so it's OK to install ipvs rules.
 
 			// Build ipvs kernel routes for each node ip address
-			nodeIPs, err := proxier.IPGetter.NodeIPs()
+			nodeIPs, err := proxier.ipGetter.NodeIPs()
 			if err != nil {
 				glog.Errorf("Failed to get node IP, err: %v", err)
 			} else {
@@ -834,15 +861,9 @@ func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, a
 	if appliedSvc == nil || !appliedSvc.Equal(ipvsSvc) {
 		if appliedSvc == nil {
 			glog.V(3).Infof("Adding new service %q at %s:%d/%s", svcName, ipvsSvc.Address, ipvsSvc.Port, ipvsSvc.Protocol)
-			if alias {
-				err := proxier.ipvs.SetAlias(ipvsSvc)
-				if err != nil {
-					glog.Errorf("Failed to set VIP alias to network device %q: %v", svcName, err)
-					return err
-				}
-			}
 		} else {
 			glog.V(3).Infof("ipvs service has changed.")
+			// delete old ipvs service and alias device
 			err := proxier.ipvs.DeleteService(appliedSvc)
 			if err != nil {
 				glog.Errorf("Failed to delete ipvs service, err:%v", err)
@@ -855,6 +876,16 @@ func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, a
 			return err
 		}
 	}
+
+	// set alias device whenever it was changed or not, in case of removing by other process
+	if alias {
+		err := proxier.ipvs.SetAlias(ipvsSvc)
+		if err != nil {
+			glog.Errorf("Failed to set VIP alias to dummy device %q: %v", svcName, err)
+			return err
+		}
+	}
+
 	return nil
 }
 
