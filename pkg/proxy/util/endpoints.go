@@ -1,27 +1,27 @@
 package util
 
 import (
+	"fmt"
+	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/proxy"
-	"github.com/golang/glog"
-	"fmt"
-	"reflect"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/pkg/features"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // internal struct for endpoints information
-type endpointsInfo struct {
+type EndpointsInfo struct {
 	Endpoint string // TODO: should be an endpointString type
 	IsLocal  bool
 }
 
-func (e *endpointsInfo) String() string {
+func (e *EndpointsInfo) String() string {
 	return fmt.Sprintf("%v", *e)
 }
 
@@ -30,7 +30,7 @@ type EndpointServicePair struct {
 	ServicePortName proxy.ServicePortName
 }
 
-type ProxyEndpointsMap map[proxy.ServicePortName][]*endpointsInfo
+type ProxyEndpointsMap map[proxy.ServicePortName][]*EndpointsInfo
 
 type endpointsChange struct {
 	previous *api.Endpoints
@@ -65,9 +65,9 @@ func detectStaleConnections(oldEndpointsMap, newEndpointsMap ProxyEndpointsMap, 
 // <endpointsMap> is updated by this function (based on the given changes).
 // <changes> map is cleared after applying them.
 func UpdateEndpointsMap(
-endpointsMap ProxyEndpointsMap,
-changes *EndpointsChangeMap,
-hostname string) (syncRequired bool, hcEndpoints map[types.NamespacedName]int, staleSet map[EndpointServicePair]bool) {
+	endpointsMap ProxyEndpointsMap,
+	changes *EndpointsChangeMap,
+	hostname string) (syncRequired bool, hcEndpoints map[types.NamespacedName]int, staleSet map[EndpointServicePair]bool) {
 	syncRequired = false
 	staleSet = make(map[EndpointServicePair]bool)
 	for _, change := range changes.items {
@@ -127,7 +127,7 @@ func endpointsToEndpointsMap(endpoints *api.Endpoints, hostname string) ProxyEnd
 					glog.Warningf("ignoring invalid endpoint port %s with empty host", port.Name)
 					continue
 				}
-				epInfo := &endpointsInfo{
+				epInfo := &EndpointsInfo{
 					Endpoint: net.JoinHostPort(addr.IP, strconv.Itoa(int(port.Port))),
 					IsLocal:  addr.NodeName != nil && *addr.NodeName == hostname,
 				}

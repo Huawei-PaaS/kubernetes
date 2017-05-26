@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/proxy"
 	"k8s.io/kubernetes/pkg/api/helper"
+	"k8s.io/kubernetes/pkg/proxy"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -38,8 +38,8 @@ type ServiceInfo struct {
 // <serviceMap> is updated by this function (based on the given changes).
 // <changes> map is cleared after applying them.
 func UpdateServiceMap(
-serviceMap ProxyServiceMap,
-changes *ServiceChangeMap) (syncRequired bool, hcServices map[types.NamespacedName]uint16, staleServices sets.String) {
+	serviceMap ProxyServiceMap,
+	changes *ServiceChangeMap) (syncRequired bool, hcServices map[types.NamespacedName]uint16, staleServices sets.String) {
 	syncRequired = false
 	staleServices = sets.NewString()
 
@@ -66,7 +66,7 @@ changes *ServiceChangeMap) (syncRequired bool, hcServices map[types.NamespacedNa
 func newServiceInfo(serviceName proxy.ServicePortName, port *api.ServicePort, service *api.Service) *ServiceInfo {
 	onlyNodeLocalEndpoints := false
 	if utilfeature.DefaultFeatureGate.Enabled(features.ExternalTrafficLocalOnly) &&
-	apiservice.RequestsOnlyLocalTraffic(service) {
+		apiservice.RequestsOnlyLocalTraffic(service) {
 		onlyNodeLocalEndpoints = true
 	}
 	info := &ServiceInfo{
