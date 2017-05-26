@@ -274,10 +274,9 @@ func CleanupIptablesLeftovers(ipt utiliptables.Interface) (encounteredError bool
 	}
 
 	// Flush and remove all of our chains.
-	if iptablesSaveRaw, err := ipt.Save(utiliptables.TableNAT); err != nil {
-		glog.Errorf("Failed to execute iptables-save for %s: %v", utiliptables.TableNAT, err)
-		encounteredError = true
-	} else {
+	if true {
+		var iptablesSaveRaw []byte
+		var err error
 		existingNATChains := utiliptables.GetChainLines(utiliptables.TableNAT, iptablesSaveRaw)
 		natChains := bytes.NewBuffer(nil)
 		natRules := bytes.NewBuffer(nil)
@@ -476,7 +475,8 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	// Get iptables-save output so we can check for existing chains and rules.
 	// This will be a map of chain name to chain with rules as stored in iptables-save/iptables-restore
 	existingNATChains := make(map[utiliptables.Chain]string)
-	iptablesSaveRaw, err := proxier.iptables.Save(utiliptables.TableNAT)
+	var iptablesSaveRaw []byte
+	var err error
 	if err != nil { // if we failed to get any rules
 		glog.Errorf("Failed to execute iptables-save, syncing all rules: %v", err)
 	} else { // otherwise parse the output
