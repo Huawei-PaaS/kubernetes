@@ -415,7 +415,6 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 			return nil, fmt.Errorf("unable to read IPTables MasqueradeBit from config")
 		}
 
-		// TODO this has side effects that should only happen when Run() is invoked.
 		proxierIPTables, err := iptables.NewProxier(
 			iptInterface,
 			utilsysctl.New(),
@@ -438,13 +437,12 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 		serviceEventHandler = proxierIPTables
 		endpointsEventHandler = proxierIPTables
 		// No turning back. Remove artifacts that might still exist from the userspace Proxier.
-		glog.V(0).Info("Tearing down userspace rules.")
+		glog.V(0).Info("Tearing down userspace and ipvs rules.")
 		// TODO this has side effects that should only happen when Run() is invoked.
 		userspace.CleanupLeftovers(iptInterface)
 		ipvs.CleanupLeftovers(ipvsInterface, iptInterface)
 	} else if proxyMode == proxyModeIPVS {
 		glog.V(0).Info("Using ipvs Proxier.")
-		// TODO this has side effects that should only happen when Run() is invoked.
 		ipvsInterface := utilipvs.New(execer, dbus)
 		proxierIPVS, err := ipvs.NewProxier(
 			iptInterface,

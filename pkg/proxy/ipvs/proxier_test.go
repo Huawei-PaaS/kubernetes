@@ -92,7 +92,7 @@ func NewFakeProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface, nodeIPs
 		portMapper:       &fakePortOpener{[]*proxyutil.LocalPort{}},
 		healthChecker:    newFakeHealthChecker(),
 		ipvsScheduler:    utilipvs.DefaultIPVSScheduler,
-		IPGetter:         &fakeIPGetter{nodeIPs: nodeIPs},
+		ipGetter:         &fakeIPGetter{nodeIPs: nodeIPs},
 	}
 }
 

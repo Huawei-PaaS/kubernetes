@@ -178,4 +178,8 @@ func (*FakeIPVS) DeleteDestination(serv *utilipvs.Service, dest *utilipvs.Destin
 	return nil
 }
 
+func (*FakeIPVS) CheckAliasDevice(string) error {
+	return nil
+}
+
 var _ = utilipvs.Interface(&FakeIPVS{})

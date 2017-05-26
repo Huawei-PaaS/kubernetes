@@ -38,10 +38,6 @@ import (
 const (
 	DefaultIPVSScheduler = "rr"
 
-	// In "ipvs" proxy mode, the following two flags need to be set
-	sysctlVsConnTrack = "net/ipv4/vs/conntrack"
-	sysctlForward     = "net/ipv4/ip_forward"
-
 	ipvsSvcFlagPersist   = 0x1
 	ipvsSvcFlagHashed    = 0x2
 	ipvsSvcFlagOnePacket = 0x4
@@ -72,14 +68,6 @@ type Destination struct {
 	Weight  int
 }
 
-var ipvsModules = []string{
-	"ip_vs",
-	"ip_vs_rr",
-	"ip_vs_wrr",
-	"ip_vs_sh",
-	"nf_conntrack_ipv4",
-}
-
 const AliasDevice = "kube0"
 const cmd = "ip"
 
@@ -97,12 +85,12 @@ const DefaultIpvsScheduler = "rr"
 // An injectable interface for running iptables commands.  Implementations must be goroutine-safe.
 type Interface interface {
 	InitIpvsInterface() error
+	CheckAliasDevice(string) error
 	CreateAliasDevice(aliasDev string) error
 	DeleteAliasDevice(aliasDev string) error
 	SetAlias(serv *Service) error
 	UnSetAlias(serv *Service) error
 	AddService(*Service) error
-	UpdateService(*Service) error
 	DeleteService(*Service) error
 	GetService(*Service) (*Service, error)
 	GetServices() ([]*Service, error)
@@ -112,7 +100,6 @@ type Interface interface {
 
 	AddDestination(*Service, *Destination) error
 	GetDestinations(*Service) ([]*Destination, error)
-	UpdateDestination(*Service, *Destination) error
 	DeleteDestination(*Service, *Destination) error
 }
 
@@ -183,168 +170,9 @@ func (runner *runner) connectToFirewallD() {
 	go runner.dbusSignalHandler(bus)
 }
 
-// GetVersion returns the version string.
-/*func (runner *runner) GetVersion() string {
-	return ipvs.Version().String()
-}*/
-
 var ipvs_handle *ipvs.Handle
 
 type IPProto uint16
-
-func (runner *runner) InitIpvsInterface() error {
-	glog.V(6).Infof("Preparation for ipvs")
-
-	// The system command "modeprobe" is hard coded here.
-	for _, module := range ipvsModules {
-		_, err := runner.exec.Command("modprobe", module).CombinedOutput()
-		if err != nil {
-			glog.Errorf("Error: Can not load module: %s in lvs proxier", module)
-			return err
-		}
-	}
-
-	// Setup ioctrl flags
-	if err := runner.setSystemFlagInt(sysctlVsConnTrack, 1); err != nil {
-		return err
-	}
-	if err := runner.setSystemFlagInt(sysctlForward, 1); err != nil {
-		return err
-	}
-
-	if err := runner.CreateAliasDevice(AliasDevice); err != nil {
-		glog.Errorf("createAliasDevice: Alias network device cannot be created. Error: %v", err)
-		return err
-	}
-
-	var err error
-	if ipvs_handle, err = ipvs.New(""); err != nil {
-		glog.Errorf("InitIpvsInterface: Ipvs cannot be Inited. Error: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-func ToProtocolNumber(protocol string) uint16 {
-	switch strings.ToLower(protocol) {
-	case "tcp":
-		return uint16(syscall.IPPROTO_TCP)
-	case "udp":
-		return uint16(syscall.IPPROTO_UDP)
-	}
-
-	return uint16(0)
-}
-
-func (runner *runner) AddService(svc *Service) error {
-	if svc.Scheduler == "" {
-		svc.Scheduler = DefaultIPVSScheduler
-	}
-
-	return ipvs_handle.NewService(NewIpvsService(svc))
-}
-
-//Empty Implementation
-func (runner *runner) UpdateService(svc *Service) error {
-	return nil
-}
-
-func (runner *runner) DeleteService(svc *Service) error {
-
-	return ipvs_handle.DelService(NewIpvsService(svc))
-}
-
-func (runner *runner) CreateAliasDevice(aliasDev string) error {
-
-	if aliasDev == AliasDevice {
-		// Generate device alias
-		args := []string{"link", "add", aliasDev, "type", "dummy"}
-		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-			// "exit status 2" is returned from the above run command if the device already exists
-			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
-				glog.Errorf("Error: Cannot create alias network device: %s", aliasDev)
-				return err
-			}
-			glog.V(6).Infof(" Info: Alias network device already exists and skip create: args: %s", args)
-			return nil
-		}
-		glog.V(6).Infof(" Succeeded: Create alias device: %s", aliasDev)
-	}
-
-	return nil
-
-}
-
-func (runner *runner) DeleteAliasDevice(aliasDev string) error {
-	if aliasDev == AliasDevice {
-		// Delete device alias
-		args := []string{"link", "del", aliasDev}
-		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-			// "exit status 2" is returned from the above run command if the device don't exists
-			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
-				glog.Errorf("Error: Cannot delete alias network device: %s", aliasDev)
-				return err
-			}
-			glog.V(6).Infof(" Info: Alias network device don't exists and skip delete: args: %s", args)
-			return nil
-		}
-		glog.V(6).Infof(" Succeeded: Delete alias device: %s", aliasDev)
-	}
-
-	return nil
-}
-
-func (runner *runner) setSystemFlagInt(sysControl string, value int) error {
-	if val, err := runner.sysctl.GetSysctl(sysControl); err == nil && val != value {
-		runner.sysctl.SetSysctl(sysControl, value)
-	} else if err != nil {
-		glog.Errorf("Error: System control flag [%s] cannot be set", sysControl)
-		return err
-	}
-	return nil
-}
-
-func (runner *runner) SetAlias(serv *Service) error {
-	// TODO:  Hard code command to config aliases to network device
-
-	// Generate device alias
-	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{"addr", "add", serv.Address.String(), "dev", AliasDevice, "label", alias}
-	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 2" is returned from the above run command if the alias exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
-			glog.Errorf("Error: Cannot create alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
-			return err
-		}
-	}
-	glog.V(6).Infof(" Succeeded: Set ailias [%s] to network device [%s]", serv.Address.String(), alias)
-	return nil
-}
-
-func (runner *runner) UnSetAlias(serv *Service) error {
-	// TODO:  Hard code command to config aliases to network device
-
-	// Unset device alias
-	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
-	args := []string{"addr", "del", serv.Address.String(), "dev", AliasDevice, "label", alias}
-	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
-		// "exit status 2" is returned from the above run command if the alias is not exists
-		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
-			glog.Errorf("Error: Cannot unset alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
-			return err
-		}
-	}
-	glog.V(6).Infof(" Succeeded: UnSet ailias [%s] to network device [%s]", serv.Address.String(), alias)
-	return nil
-}
-
-func IPtoInt(ip net.IP) uint32 {
-	if len(ip) == 16 {
-		return binary.BigEndian.Uint32(ip[12:16])
-	}
-	return binary.BigEndian.Uint32(ip)
-}
 
 //// goroutine to listen for D-Bus signals
 func (runner *runner) dbusSignalHandler(bus utildbus.Connection) {
@@ -393,16 +221,188 @@ func (runner *runner) reload() {
 	}
 }
 
+func (runner *runner) InitIpvsInterface() error {
+	glog.V(6).Infof("Preparation for ipvs")
+
+	var err error
+	if ipvs_handle, err = ipvs.New(""); err != nil {
+		glog.Errorf("InitIpvsInterface: Ipvs cannot be Inited. Error: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (runner *runner) setSystemFlagInt(sysControl string, value int) error {
+	if val, err := runner.sysctl.GetSysctl(sysControl); err == nil && val != value {
+		runner.sysctl.SetSysctl(sysControl, value)
+	} else if err != nil {
+		glog.Errorf("Error: System control flag [%s] cannot be set", sysControl)
+		return err
+	}
+	return nil
+}
+
+func (runner *runner) CheckAliasDevice(aliasDev string) error {
+	_, err := net.InterfaceByName(aliasDev)
+	if err == nil {
+		return nil
+	}
+	err = runner.CreateAliasDevice(aliasDev)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getAllAlias(aliasDev string) ([]net.IP, error) {
+	i, err := net.InterfaceByName(aliasDev)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := i.Addrs()
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0)
+	for _, addr := range addrs {
+		ip, _, err := net.ParseCIDR(addr.String())
+		if err != nil {
+			return nil, err
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
+
+}
+
+func (runner *runner) CreateAliasDevice(aliasDev string) error {
+
+	if aliasDev == AliasDevice {
+		// Generate device alias
+		args := []string{"link", "add", aliasDev, "type", "dummy"}
+		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
+			// "exit status 2" is returned from the above run command if the device already exists
+			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
+				glog.Errorf("Error: Cannot create alias network device: %s", aliasDev)
+				return err
+			}
+			glog.V(6).Infof(" Info: Alias network device already exists and skip create: args: %s", args)
+			return nil
+		}
+		glog.V(6).Infof(" Succeeded: Create alias device: %s", aliasDev)
+	}
+
+	return nil
+
+}
+
+func (runner *runner) DeleteAliasDevice(aliasDev string) error {
+	if aliasDev == AliasDevice {
+		// Delete device alias
+		args := []string{"link", "del", aliasDev}
+		if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
+			// "exit status 1" is returned from the above run command if the device don't exists
+			if !strings.Contains(fmt.Sprintf("%v", err), "exit status 1") {
+				glog.Errorf("Error: Cannot delete alias network device: %s", aliasDev)
+				return err
+			}
+			glog.V(6).Infof(" Info: Alias network device don't exists and skip delete: args: %s", args)
+			return nil
+		}
+		glog.V(6).Infof(" Succeeded: Delete alias device: %s", aliasDev)
+	}
+
+	return nil
+}
+
+func (runner *runner) SetAlias(serv *Service) error {
+	// TODO:  Hard code command to config aliases to network device
+	ips, err := getAllAlias(AliasDevice)
+	var found bool = false
+	if err == nil {
+		for _, ip := range ips {
+			if ip.Equal(serv.Address) {
+				found = true
+				break
+			}
+		}
+	}
+	if found {
+		return nil
+	}
+	// Generate device alias
+	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
+	args := []string{"addr", "add", serv.Address.String(), "dev", AliasDevice, "label", alias}
+	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
+		// "exit status 2" is returned from the above run command if the alias exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
+			glog.Errorf("Error: Cannot create alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
+			return err
+		}
+	}
+	glog.V(6).Infof(" Succeeded: Set ailias [%s] to network device [%s]", serv.Address.String(), alias)
+	return nil
+}
+
+func (runner *runner) UnSetAlias(serv *Service) error {
+	// TODO:  Hard code command to config aliases to network device
+
+	// Unset device alias
+	alias := AliasDevice + ":" + strconv.FormatUint(uint64(IPtoInt(serv.Address)), 10)
+	args := []string{"addr", "del", serv.Address.String(), "dev", AliasDevice, "label", alias}
+	if _, err := runner.exec.Command(cmd, args...).CombinedOutput(); err != nil {
+		// "exit status 2" is returned from the above run command if the alias is not exists
+		if !strings.Contains(fmt.Sprintf("%v", err), "exit status 2") {
+			glog.Errorf("Error: Cannot unset alias for service : alias: %s, service: %v, error: %v", alias, serv.Address, err)
+			return err
+		}
+	}
+	glog.V(6).Infof(" Succeeded: UnSet ailias [%s] to network device [%s]", serv.Address.String(), alias)
+	return nil
+}
+
+func ToProtocolNumber(protocol string) uint16 {
+	switch strings.ToLower(protocol) {
+	case "tcp":
+		return uint16(syscall.IPPROTO_TCP)
+	case "udp":
+		return uint16(syscall.IPPROTO_UDP)
+	}
+
+	return uint16(0)
+}
+
+func IPtoInt(ip net.IP) uint32 {
+	if len(ip) == 16 {
+		return binary.BigEndian.Uint32(ip[12:16])
+	}
+	return binary.BigEndian.Uint32(ip)
+}
+
+func (runner *runner) AddService(svc *Service) error {
+	if svc.Scheduler == "" {
+		svc.Scheduler = DefaultIpvsScheduler
+	}
+
+	return ipvs_handle.NewService(NewIpvsService(svc))
+}
+
+func (runner *runner) DeleteService(svc *Service) error {
+
+	return ipvs_handle.DelService(NewIpvsService(svc))
+}
+
 func (runner *runner) GetService(svc *Service) (*Service, error) {
 	ipvsService, err := ipvs_handle.GetService(NewIpvsService(svc))
 	if err != nil {
 		return nil, err
 	}
-	var rsvc *Service
-	rsvc, err = toService(ipvsService)
+	rsvc, err := toService(ipvsService)
 	if err != nil {
 		return nil, err
 	}
+
 	return rsvc, nil
 }
 
@@ -444,24 +444,7 @@ func (runner *runner) AddDestination(svc *Service, dst *Destination) error {
 		return errors.New("Invalid Service Interface")
 	}
 
-	err := ipvs_handle.NewDestination(NewIpvsService(svc), NewIPVSDestination(dst))
-	if err != nil {
-		if !strings.Contains(err.Error(), "object exists") {
-			glog.Errorf("Error: Cannot add destination: %v, error: %v", dst, err)
-			return err
-		}
-	}
-
-	glog.V(6).Infof("Endpoints: [%+v] added", dst)
-	return nil
-}
-
-//Empty Implementation
-func (runner *runner) UpdateDestination(svc *Service, dst *Destination) error {
-	if svc == nil {
-		return errors.New("Invalid Service Interface")
-	}
-	return nil
+	return ipvs_handle.NewDestination(NewIpvsService(svc), NewIPVSDestination(dst))
 }
 
 func (runner *runner) DeleteDestination(svc *Service, dst *Destination) error {
@@ -500,26 +483,34 @@ func (runner *runner) GetDestinations(svc *Service) ([]*Destination, error) {
 
 // toService converts a service entry from its IPVS representation to the Go
 // equivalent Service structure.
-func toService(svc *ipvs.Service) (*Service, error) {
-	if svc == nil {
-		return nil, errors.New("Invalid Service Interface")
+func toService(ipvsSvc *ipvs.Service) (*Service, error) {
+	if ipvsSvc == nil {
+		return nil, errors.New("Invalid IpvsSvc Interface")
+	}
+	service := &Service{
+		Address:   ipvsSvc.Address,
+		Port:      ipvsSvc.Port,
+		Scheduler: ipvsSvc.SchedName,
+		Protocol:  String(IPProto(ipvsSvc.Protocol)),
+		Flags:     ipvsSvc.Flags,
+		Timeout:   ipvsSvc.Timeout,
 	}
 
-	return &Service{
-		Address:   svc.Address,
-		Port:      svc.Port,
-		Scheduler: svc.SchedName,
-		Protocol:  String(IPProto(svc.Protocol)),
-		Flags:     svc.Flags,
-		Timeout:   svc.Timeout,
-	}, nil
+	if service.Address == nil {
+		if ipvsSvc.AddressFamily == syscall.AF_INET {
+			service.Address = net.IPv4zero
+		} else {
+			service.Address = net.IPv6zero
+		}
+	}
+	return service, nil
 }
 
 // toDestination converts a destination entry from its IPVS representation
 // to the Go equivalent Destination structure.
 func toDestination(ipvsDst *ipvs.Destination) (*Destination, error) {
 	if ipvsDst == nil {
-		return nil, errors.New("Invalid ipvsDst Interface")
+		return nil, errors.New("Invalid IpvsDst Interface")
 	}
 	dst := &Destination{
 		Address: ipvsDst.Address,
@@ -540,6 +531,7 @@ func NewIpvsService(svc *Service) *ipvs.Service {
 		Flags:     svc.Flags,
 		Timeout:   svc.Timeout,
 	}
+
 	if ip4 := svc.Address.To4(); ip4 != nil {
 		ipvsSvc.AddressFamily = syscall.AF_INET
 		ipvsSvc.Netmask = 0xffffffff
@@ -567,5 +559,5 @@ func String(proto IPProto) string {
 	case syscall.IPPROTO_UDP:
 		return "UDP"
 	}
-	return fmt.Sprintf("IP(%d)", proto)
+	return ""
 }
