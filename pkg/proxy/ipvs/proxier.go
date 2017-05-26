@@ -1,5 +1,5 @@
 /*
-Copyright 2015 The Kubernetes Authors.
+Copyright 2017 The Kubernetes Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -98,6 +98,44 @@ type Proxier struct {
 	healthzServer  healthcheck.HealthzUpdater
 	ipvs           utilipvs.Interface
 	ipvsScheduler  string
+	// inject it, for test purpose
+	IPGetter IPGetter
+}
+
+type IPGetter interface {
+	NodeIPs() ([]net.IP, error)
+}
+
+type realIPGetter struct{}
+
+func (r *realIPGetter) NodeIPs() (ips []net.IP, err error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	for i := range interfaces {
+		name := interfaces[i].Name
+		// We assume node ip bind to eth{x}
+		if !strings.HasPrefix(name, "eth") {
+			continue
+		}
+		intf, err := net.InterfaceByName(name)
+		if err != nil {
+			continue
+		}
+		addrs, err := intf.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok {
+				if ipnet.IP.To4() != nil {
+					ips = append(ips, ipnet.IP.To4())
+				}
+			}
+		}
+	}
+	return
 }
 
 // Proxier implements ProxyProvider
@@ -155,6 +193,10 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		glog.Warningf("clusterCIDR not specified, unable to distinguish between internal and external traffic")
 	}
 
+	if masqueradeAll == false {
+		glog.Warningf("masqueradeAll not specified, unable to do snat for ipvs proxy. It may cause break cross host traffic")
+	}
+
 	healthChecker := healthcheck.NewServer(hostname, recorder, nil, nil) // use default implementations of deps
 
 	var throttle flowcontrol.RateLimiter
@@ -191,6 +233,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 		healthzServer:    healthzServer,
 		ipvs:             ipvs,
 		ipvsScheduler:    scheduler,
+		IPGetter:         &realIPGetter{},
 	}, nil
 }
 
@@ -360,27 +403,6 @@ func (proxier *Proxier) OnEndpointsSynced() {
 	proxier.syncProxyRules(syncReasonEndpoints)
 }
 
-const noConnectionToDelete = "0 flow entries have been deleted"
-
-// After a UDP endpoint has been removed, we must flush any pending conntrack entries to it, or else we
-// risk sending more traffic to it, all of which will be lost (because UDP).
-// This assumes the proxier mutex is held
-func (proxier *Proxier) deleteEndpointConnections(connectionMap map[utilproxy.EndpointServicePair]bool) {
-	for epSvcPair := range connectionMap {
-		if svcInfo, ok := proxier.serviceMap[epSvcPair.ServicePortName]; ok && svcInfo.Protocol == api.ProtocolUDP {
-			endpointIP := strings.Split(epSvcPair.Endpoint, ":")[0]
-			glog.V(2).Infof("Deleting connection tracking state for service IP %s, endpoint IP %s", svcInfo.ClusterIP.String(), endpointIP)
-			err := utilproxy.ExecConntrackTool(proxier.exec, "-D", "--orig-dst", svcInfo.ClusterIP.String(), "--dst-nat", endpointIP, "-p", "udp")
-			if err != nil && !strings.Contains(err.Error(), noConnectionToDelete) {
-				// TODO: Better handling for deletion failure. When failure occur, stale udp connection may not get flushed.
-				// These stale udp connection will keep black hole traffic. Making this a best effort operation for now, since it
-				// is expensive to baby sit all udp connections to kubernetes services.
-				glog.Errorf("conntrack return with error: %v", err)
-			}
-		}
-	}
-}
-
 type syncReason string
 
 const syncReasonServices syncReason = "ServicesUpdate"
@@ -427,6 +449,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	// If this was called because of an endpoints update, but nothing actionable has changed, skip it.
 	if reason == syncReasonEndpoints && !endpointsSyncRequired {
 		glog.V(3).Infof("Skipping ipvs sync because nothing changed")
+		fmt.Printf("Skipping ipvs sync because nothing changed\n")
 		return
 	}
 
@@ -525,6 +548,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 
 	// Build rules for each service.
 	for svcName, svcInfo := range proxier.serviceMap {
+		fmt.Printf("svcName, svcInfo := %v, %v\n", svcName, svcInfo)
 		protocol := strings.ToLower(string(svcInfo.Protocol))
 		// Precompute svcNameString; with many services the many calls
 		// to ServicePortName.String() show up in CPU profiles.
@@ -687,13 +711,13 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 					continue
 				}
 				if lp.Protocol == "udp" {
-					proxier.clearUDPConntrackForPort(lp.Port)
+					utilproxy.ClearUDPConntrackForPort(proxier.exec, lp.Port)
 				}
 				replacementPortsMap[lp] = socket
 			} // We're holding the port, so it's OK to install ipvs rules.
 
 			// Build ipvs kernel routes for each node ip address
-			nodeIPs, err := getNodeIPs()
+			nodeIPs, err := proxier.IPGetter.NodeIPs()
 			if err != nil {
 				glog.Errorf("Failed to get node IP, err: %v", err)
 			} else {
@@ -772,9 +796,8 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	}
 
 	// Finish housekeeping.
-	// TODO: these and clearUDPConntrackForPort() could be made more consistent.
 	utilproxy.DeleteServiceConnections(proxier.exec, staleServices.List())
-	proxier.deleteEndpointConnections(staleEndpoints)
+	utilproxy.DeleteEndpointConnections(proxier.exec, proxier.serviceMap, staleEndpoints)
 }
 
 func (proxier *Proxier) ensureKubeServiceChain() {
@@ -800,56 +823,9 @@ func (proxier *Proxier) ensureKubeServiceChain() {
 	}
 }
 
-// Clear UDP conntrack for port or all conntrack entries when port equal zero.
-// When a packet arrives, it will not go through NAT table again, because it is not "the first" packet.
-// The solution is clearing the conntrack. Known issus:
-// https://github.com/docker/docker/issues/8795
-// https://github.com/kubernetes/kubernetes/issues/31983
-func (proxier *Proxier) clearUDPConntrackForPort(port int) {
-	glog.V(2).Infof("Deleting conntrack entries for udp connections")
-	if port > 0 {
-		err := utilproxy.ExecConntrackTool(proxier.exec, "-D", "-p", "udp", "--dport", strconv.Itoa(port))
-		if err != nil && !strings.Contains(err.Error(), noConnectionToDelete) {
-			glog.Errorf("conntrack return with error: %v", err)
-		}
-	} else {
-		glog.Errorf("Wrong port number. The port number must be greater than zero")
-	}
-}
-
 // Join all words with spaces, terminate with newline and write to buf.
 func writeLine(buf *bytes.Buffer, words ...string) {
 	buf.WriteString(strings.Join(words, " ") + "\n")
-}
-
-func getNodeIPs() (ips []net.IP, err error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	for i := range interfaces {
-		name := interfaces[i].Name
-		// We assume node ip bind to eth{x}
-		if !strings.HasPrefix(name, "eth") {
-			continue
-		}
-		intf, err := net.InterfaceByName(name)
-		if err != nil {
-			continue
-		}
-		addrs, err := intf.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			if ipnet, ok := a.(*net.IPNet); ok {
-				if ipnet.IP.To4() != nil {
-					ips = append(ips, ipnet.IP.To4())
-				}
-			}
-		}
-	}
-	return
 }
 
 func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, alias bool) error {
@@ -910,8 +886,6 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 		}
 	}
 
-	glog.V(6).Infof("curEndPoints: %v", curEndpoints)
-	glog.V(6).Infof("newEndPoints: %v", newEndpoints)
 	if !curEndpoints.Equal(newEndpoints) {
 		for _, ep := range newEndpoints.Difference(curEndpoints).List() {
 			ip, port := parseHostPort(ep)
@@ -927,22 +901,18 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 					glog.Errorf("Error: Cannot add destination: %v, error: %v", newDest, err)
 				}
 			}
-			glog.V(6).Infof("Endpoints: [%+v] added", newDest)
 		}
 
 		for _, ep := range curEndpoints.Difference(newEndpoints).List() {
 			ip, port := parseHostPort(ep)
-			glog.V(6).Infof("Different ep: %v, ip:%s, port: %d, netParseIP: [%+v]", ep, ip, port, net.ParseIP(ip))
 			delDest := &utilipvs.Destination{
 				Address: net.ParseIP(ip),
 				Port:    uint16(port),
 			}
-			glog.V(6).Infof("Endpoints: [%v] will be deleted", delDest)
 			err := proxier.ipvs.DeleteDestination(svc, delDest)
 			if err != nil {
 				glog.Errorf("Error: Cannot delete destination: %v, error: %v", delDest, err)
 			}
-			glog.V(6).Infof("Endpoints: [%+v] deleted", delDest)
 		}
 	}
 	return nil
