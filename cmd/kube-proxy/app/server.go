@@ -448,10 +448,12 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 	} else {
 		dbus = utildbus.New()
 		iptInterface = utiliptables.New(execer, dbus, protocol)
-		ipvsInterface = utilipvs.New(execer, dbus)
-		err := ipvsInterface.InitIpvsInterface()
-		if err != nil {
-			return nil, fmt.Errorf("unable to init ipvs: %v", err)
+		if config.Mode == proxyModeIPVS {
+			ipvsInterface = utilipvs.New(execer, dbus)
+			err := ipvsInterface.InitIpvsInterface()
+			if err != nil {
+				return nil, fmt.Errorf("unable to init ipvs: %v", err)
+			}
 		}
 	}
 

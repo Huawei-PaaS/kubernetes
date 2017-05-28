@@ -62,7 +62,7 @@ const sysctlBridgeCallIPTables = "net/bridge/bridge-nf-call-iptables"
 
 // In "ipvs" proxy mode, the following two flags need to be set
 const sysctlVsConnTrack = "net/ipv4/vs/conntrack"
-const sysctlForward     = "net/ipv4/ip_forward"
+const sysctlForward = "net/ipv4/ip_forward"
 
 var ipvsModules = []string{
 	"ip_vs",
@@ -207,7 +207,7 @@ func NewProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface,
 	}
 
 	if err := ipvs.CreateAliasDevice(utilipvs.AliasDevice); err != nil {
-		return  nil, fmt.Errorf("Alias device cannot be created: %v", err)
+		return nil, fmt.Errorf("Alias device cannot be created: %v", err)
 	}
 
 	// Generate the masquerade mark to use for SNAT rules.
@@ -307,11 +307,12 @@ func CleanupIptablesLeftovers(ipt utiliptables.Interface) (encounteredError bool
 	}
 
 	// Flush and remove all of our chains.
-	if iptablesSaveRaw, err := ipt.Save(utiliptables.TableNAT); err != nil {
+	iptablesData := bytes.NewBuffer(nil)
+	if err := ipt.SaveInto(utiliptables.TableNAT, iptablesData); err != nil {
 		glog.Errorf("Failed to execute iptables-save for %s: %v", utiliptables.TableNAT, err)
 		encounteredError = true
 	} else {
-		existingNATChains := utiliptables.GetChainLines(utiliptables.TableNAT, iptablesSaveRaw)
+		existingNATChains := utiliptables.GetChainLines(utiliptables.TableNAT, iptablesData.Bytes())
 		natChains := bytes.NewBuffer(nil)
 		natRules := bytes.NewBuffer(nil)
 		writeLine(natChains, "*nat")
@@ -498,11 +499,12 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	// Get iptables-save output so we can check for existing chains and rules.
 	// This will be a map of chain name to chain with rules as stored in iptables-save/iptables-restore
 	existingNATChains := make(map[utiliptables.Chain]string)
-	iptablesSaveRaw, err := proxier.iptables.Save(utiliptables.TableNAT)
+	iptablesData := bytes.NewBuffer(nil)
+	err := proxier.iptables.SaveInto(utiliptables.TableNAT, iptablesData)
 	if err != nil { // if we failed to get any rules
 		glog.Errorf("Failed to execute iptables-save, syncing all rules: %v", err)
 	} else { // otherwise parse the output
-		existingNATChains = utiliptables.GetChainLines(utiliptables.TableNAT, iptablesSaveRaw)
+		existingNATChains = utiliptables.GetChainLines(utiliptables.TableNAT, iptablesData.Bytes())
 	}
 
 	natChains := bytes.NewBuffer(nil)
