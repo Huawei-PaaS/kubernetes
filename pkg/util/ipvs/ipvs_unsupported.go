@@ -1,3 +1,5 @@
+// +build !linux
+
 /*
 Copyright 2014 The Kubernetes Authors.
 
@@ -26,60 +28,60 @@ import (
 //Create a dummy implementation for Windows.
 
 func (runner *runner) InitIpvsInterface() error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) CheckAliasDevice(string) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) CreateAliasDevice(aliasDev string) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) DeleteAliasDevice(aliasDev string) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) SetAlias(serv *Service) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) UnSetAlias(serv *Service) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) AddService(*Service) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) DeleteService(*Service) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) GetService(*Service) (*Service, error) {
-	return nil, fmt.Errorf("IPVS not supported in Windows")
+	return nil, fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) GetServices() ([]*Service, error) {
-	return nil, fmt.Errorf("IPVS not supported in Windows")
+	return nil, fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) AddReloadFunc(reloadFunc func()) {}
 
 func (runner *runner) Flush() error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) Destroy() {}
 
 func (runner *runner) AddDestination(*Service, *Destination) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
 
 func (runner *runner) GetDestinations(*Service) ([]*Destination, error) {
-	return nil, fmt.Errorf("IPVS not supported in Windows")
+	return nil, fmt.Errorf("IPVS not supported for this platform")
 }
 func (runner *runner) DeleteDestination(*Service, *Destination) error {
-	return fmt.Errorf("IPVS not supported in Windows")
+	return fmt.Errorf("IPVS not supported for this platform")
 }
