@@ -123,6 +123,23 @@ func Test_getProxyMode(t *testing.T) {
 			kernelCompat:    true,
 			expected:        proxyModeIPTables,
 		},
+		{ // flag says ipvs, but iptable version too low
+			flag:            "ipvs",
+			iptablesVersion: "0.0.0",
+			expected:        proxyModeUserspace,
+		},
+		{ // flag says ipvs, version ok, kernel not compatible
+			flag:            "ipvs",
+			iptablesVersion: iptables.MinCheckVersion,
+			kernelCompat:    false,
+			expected:        proxyModeUserspace,
+		},
+		{ // flag says ipvs, version ok, kernel is compatible
+			flag:            "ipvs",
+			iptablesVersion: iptables.MinCheckVersion,
+			kernelCompat:    true,
+			expected:        proxyModeIPVS,
+		},
 	}
 	for i, c := range cases {
 		versioner := &fakeIPTablesVersioner{c.iptablesVersion, c.iptablesError}
@@ -208,84 +225,5 @@ func TestGetConntrackMax(t *testing.T) {
 		} else if x != tc.expected {
 			t.Errorf("[%d] expected %d, got %d", i, tc.expected, x)
 		}
-	}
-}
-
-func TestLoadConfig(t *testing.T) {
-	yaml := `apiVersion: componentconfig/v1alpha1
-bindAddress: 9.8.7.6
-clientConnection:
-  acceptContentTypes: "abc"
-  burst: 100
-  contentType: content-type
-  kubeconfig: "/path/to/kubeconfig"
-  qps: 7
-clusterCIDR: "1.2.3.0/24"
-configSyncPeriod: 15s
-conntrack:
-  max: 4
-  maxPerCore: 2
-  min: 1
-  tcpCloseWaitTimeout: 10s
-  tcpEstablishedTimeout: 20s
-featureGates: "all"
-healthzBindAddress: 1.2.3.4:12345
-hostnameOverride: "foo"
-iptables:
-  masqueradeAll: true
-  masqueradeBit: 17
-  minSyncPeriod: 10s
-  syncPeriod: 60s
-kind: KubeProxyConfiguration
-metricsBindAddress: 2.3.4.5:23456
-mode: "iptables"
-oomScoreAdj: 17
-portRange: "2-7"
-resourceContainer: /foo
-udpTimeoutMilliseconds: 123ms
-`
-
-	expected := &componentconfig.KubeProxyConfiguration{
-		BindAddress: "9.8.7.6",
-		ClientConnection: componentconfig.ClientConnectionConfiguration{
-			AcceptContentTypes: "abc",
-			Burst:              100,
-			ContentType:        "content-type",
-			KubeConfigFile:     "/path/to/kubeconfig",
-			QPS:                7,
-		},
-		ClusterCIDR:      "1.2.3.0/24",
-		ConfigSyncPeriod: metav1.Duration{Duration: 15 * time.Second},
-		Conntrack: componentconfig.KubeProxyConntrackConfiguration{
-			Max:                   4,
-			MaxPerCore:            2,
-			Min:                   1,
-			TCPCloseWaitTimeout:   metav1.Duration{Duration: 10 * time.Second},
-			TCPEstablishedTimeout: metav1.Duration{Duration: 20 * time.Second},
-		},
-		FeatureGates:       "all",
-		HealthzBindAddress: "1.2.3.4:12345",
-		HostnameOverride:   "foo",
-		IPTables: componentconfig.KubeProxyIPTablesConfiguration{
-			MasqueradeAll: true,
-			MasqueradeBit: util.Int32Ptr(17),
-			MinSyncPeriod: metav1.Duration{Duration: 10 * time.Second},
-			SyncPeriod:    metav1.Duration{Duration: 60 * time.Second},
-		},
-		MetricsBindAddress: "2.3.4.5:23456",
-		Mode:               "iptables",
-		OOMScoreAdj:        util.Int32Ptr(17),
-		PortRange:          "2-7",
-		ResourceContainer:  "/foo",
-		UDPIdleTimeout:     metav1.Duration{Duration: 123 * time.Millisecond},
-	}
-
-	options, err := NewOptions()
-	assert.NoError(t, err)
-
-	config, err := options.loadConfig([]byte(yaml))
-	assert.NoError(t, err)
-	if !reflect.DeepEqual(expected, config) {
-		t.Fatalf("unexpected config, diff = %s", diff.ObjectDiff(config, expected))
 	}
 }
