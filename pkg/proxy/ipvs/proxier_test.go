@@ -25,8 +25,7 @@ import (
 
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/proxy"
-	"k8s.io/kubernetes/pkg/util/exec"
-
+	fakeexec "k8s.io/utils/exec/testing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -84,7 +83,7 @@ func (fake *fakeHealthChecker) SyncEndpoints(newEndpoints map[types.NamespacedNa
 
 func NewFakeProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface, nodeIPs []net.IP) *Proxier {
 	return &Proxier{
-		exec:             &exec.FakeExec{},
+		exec:             &fakeexec.FakeExec{},
 		serviceMap:       make(proxyutil.ProxyServiceMap),
 		serviceChanges:   proxyutil.NewServiceChangeMap(),
 		endpointsMap:     make(proxyutil.ProxyEndpointsMap),
@@ -96,7 +95,7 @@ func NewFakeProxier(ipt utiliptables.Interface, ipvs utilipvs.Interface, nodeIPs
 		portsMap:         make(map[proxyutil.LocalPort]proxyutil.Closeable),
 		portMapper:       &fakePortOpener{[]*proxyutil.LocalPort{}},
 		healthChecker:    newFakeHealthChecker(),
-		ipvsScheduler:    utilipvs.DefaultIPVSScheduler,
+		ipvsScheduler:    DefaultScheduler,
 		ipGetter:         &fakeIPGetter{nodeIPs: nodeIPs},
 	}
 }
