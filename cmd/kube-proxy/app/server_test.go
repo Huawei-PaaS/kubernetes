@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/componentconfig"
-	"k8s.io/kubernetes/pkg/util"
+	utilpointer "k8s.io/kubernetes/pkg/util/pointer"
 	"k8s.io/kubernetes/pkg/util/iptables"
 )
 
@@ -273,7 +273,7 @@ udpTimeoutMilliseconds: 123ms
 		HostnameOverride:   "foo",
 		IPTables: componentconfig.KubeProxyIPTablesConfiguration{
 			MasqueradeAll: true,
-			MasqueradeBit: util.Int32Ptr(17),
+			MasqueradeBit: utilpointer.Int32Ptr(17),
 			MinSyncPeriod: metav1.Duration{Duration: 10 * time.Second},
 			SyncPeriod:    metav1.Duration{Duration: 60 * time.Second},
 		},
@@ -284,7 +284,7 @@ udpTimeoutMilliseconds: 123ms
 		},
 		MetricsBindAddress: "2.3.4.5:23456",
 		Mode:               "iptables",
-		OOMScoreAdj:        util.Int32Ptr(17),
+		OOMScoreAdj:        utilpointer.Int32Ptr(17),
 		PortRange:          "2-7",
 		ResourceContainer:  "/foo",
 		UDPIdleTimeout:     metav1.Duration{Duration: 123 * time.Millisecond},
