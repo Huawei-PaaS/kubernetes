@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/exec"
+	"k8s.io/utils/exec"
 
 	"github.com/golang/glog"
 )

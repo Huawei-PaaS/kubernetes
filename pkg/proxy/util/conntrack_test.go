@@ -25,7 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/proxy"
-	"k8s.io/kubernetes/pkg/util/exec"
+	"k8s.io/utils/exec"
+	fakeexec "k8s.io/utils/exec/testing"
 )
 
 func newFakeServiceInfo(service proxy.ServicePortName, ip net.IP, port int, protocol api.Protocol, onlyNodeLocalEndpoints bool) *ServiceInfo {
@@ -39,8 +40,8 @@ func newFakeServiceInfo(service proxy.ServicePortName, ip net.IP, port int, prot
 }
 
 func TestExecConntrackTool(t *testing.T) {
-	fcmd := exec.FakeCmd{
-		CombinedOutputScript: []exec.FakeCombinedOutputAction{
+	fcmd := fakeexec.FakeCmd{
+		CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
 			func() ([]byte, error) { return []byte("1 flow entries have been deleted"), nil },
 			func() ([]byte, error) { return []byte("1 flow entries have been deleted"), nil },
 			func() ([]byte, error) {
@@ -48,11 +49,11 @@ func TestExecConntrackTool(t *testing.T) {
 			},
 		},
 	}
-	fexec := exec.FakeExec{
-		CommandScript: []exec.FakeCommandAction{
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
+	fexec := fakeexec.FakeExec{
+		CommandScript: []fakeexec.FakeCommandAction{
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
 		},
 		LookPathFunc: func(cmd string) (string, error) { return cmd, nil },
 	}
@@ -88,8 +89,8 @@ func TestExecConntrackTool(t *testing.T) {
 }
 
 func TestDeleteServiceConnections(t *testing.T) {
-	fcmd := exec.FakeCmd{
-		CombinedOutputScript: []exec.FakeCombinedOutputAction{
+	fcmd := fakeexec.FakeCmd{
+		CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
 			func() ([]byte, error) { return []byte("1 flow entries have been deleted"), nil },
 			func() ([]byte, error) { return []byte("1 flow entries have been deleted"), nil },
 			func() ([]byte, error) {
@@ -97,11 +98,11 @@ func TestDeleteServiceConnections(t *testing.T) {
 			},
 		},
 	}
-	fexec := exec.FakeExec{
-		CommandScript: []exec.FakeCommandAction{
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
+	fexec := fakeexec.FakeExec{
+		CommandScript: []fakeexec.FakeCommandAction{
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
 		},
 		LookPathFunc: func(cmd string) (string, error) { return cmd, nil },
 	}
@@ -134,18 +135,18 @@ func TestDeleteServiceConnections(t *testing.T) {
 }
 
 func TestDeleteEndpointConnections(t *testing.T) {
-	fcmd := exec.FakeCmd{
-		CombinedOutputScript: []exec.FakeCombinedOutputAction{
+	fcmd := fakeexec.FakeCmd{
+		CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
 			func() ([]byte, error) { return []byte("1 flow entries have been deleted"), nil },
 			func() ([]byte, error) {
 				return []byte(""), fmt.Errorf("conntrack v1.4.2 (conntrack-tools): 0 flow entries have been deleted.")
 			},
 		},
 	}
-	fexec := exec.FakeExec{
-		CommandScript: []exec.FakeCommandAction{
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
-			func(cmd string, args ...string) exec.Cmd { return exec.InitFakeCmd(&fcmd, cmd, args...) },
+	fexec := fakeexec.FakeExec{
+		CommandScript: []fakeexec.FakeCommandAction{
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
+			func(cmd string, args ...string) exec.Cmd { return fakeexec.InitFakeCmd(&fcmd, cmd, args...) },
 		},
 		LookPathFunc: func(cmd string) (string, error) { return cmd, nil },
 	}
