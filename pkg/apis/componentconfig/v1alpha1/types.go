@@ -53,6 +53,19 @@ type KubeProxyIPTablesConfiguration struct {
 	MinSyncPeriod metav1.Duration `json:"minSyncPeriod"`
 }
 
+// KubeProxyIPVSConfiguration contains ipvs-related configuration
+// details for the Kubernetes proxy server.
+type KubeProxyIPVSConfiguration struct {
+	// syncPeriod is the period that ipvs rules are refreshed (e.g. '5s', '1m',
+	// '2h22m').  Must be greater than 0.
+	SyncPeriod metav1.Duration `json:"syncPeriod"`
+	// minSyncPeriod is the minimum period that ipvs rules are refreshed (e.g. '5s', '1m',
+	// '2h22m').
+	MinSyncPeriod metav1.Duration `json:"minSyncPeriod"`
+	// ipvs scheduler
+	Scheduler string `json:"scheduler"`
+}
+
 // KubeProxyConntrackConfiguration contains conntrack settings for
 // the Kubernetes proxy server.
 type KubeProxyConntrackConfiguration struct {
@@ -73,8 +86,6 @@ type KubeProxyConntrackConfiguration struct {
 	// table. (e.g. '60s'). Must be greater than 0 to set.
 	TCPCloseWaitTimeout metav1.Duration `json:"tcpCloseWaitTimeout"`
 }
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // KubeProxyConfiguration contains everything necessary to configure the
 // Kubernetes proxy server.
@@ -113,6 +124,8 @@ type KubeProxyConfiguration struct {
 	ClientConnection ClientConnectionConfiguration `json:"clientConnection"`
 	// iptables contains iptables-related configuration options.
 	IPTables KubeProxyIPTablesConfiguration `json:"iptables"`
+	// ipvs contains ipvs-related configuration options.
+	IPVS KubeProxyIPVSConfiguration `json:"ipvs"`
 	// oomScoreAdj is the oom-score-adj value for kube-proxy process. Values must be within
 	// the range [-1000, 1000]
 	OOMScoreAdj *int32 `json:"oomScoreAdj"`
@@ -145,8 +158,6 @@ const (
 	ProxyModeUserspace ProxyMode = "userspace"
 	ProxyModeIPTables  ProxyMode = "iptables"
 )
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type KubeSchedulerConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
@@ -244,8 +255,6 @@ type LeaderElectionConfiguration struct {
 	// during leader election cycles.
 	ResourceLock string `json:"resourceLock"`
 }
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // A configuration field should go in KubeletFlags instead of KubeletConfiguration if any of these are true:
 // - its value will never, or cannot safely be changed during the lifetime of a node

@@ -57,6 +57,19 @@ type KubeProxyIPTablesConfiguration struct {
 	MinSyncPeriod metav1.Duration
 }
 
+// KubeProxyIPVSConfiguration contains ipvs-related configuration
+// details for the Kubernetes proxy server.
+type KubeProxyIPVSConfiguration struct {
+	// syncPeriod is the period that ipvs rules are refreshed (e.g. '5s', '1m',
+	// '2h22m').  Must be greater than 0.
+	SyncPeriod metav1.Duration
+	// minSyncPeriod is the minimum period that ipvs rules are refreshed (e.g. '5s', '1m',
+	// '2h22m').
+	MinSyncPeriod metav1.Duration
+	// ipvs scheduler
+	Scheduler string
+}
+
 // KubeProxyConntrackConfiguration contains conntrack settings for
 // the Kubernetes proxy server.
 type KubeProxyConntrackConfiguration struct {
@@ -77,8 +90,6 @@ type KubeProxyConntrackConfiguration struct {
 	// table. (e.g. '60s'). Must be greater than 0 to set.
 	TCPCloseWaitTimeout metav1.Duration
 }
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // KubeProxyConfiguration contains everything necessary to configure the
 // Kubernetes proxy server.
@@ -117,6 +128,8 @@ type KubeProxyConfiguration struct {
 	ClientConnection ClientConnectionConfiguration
 	// iptables contains iptables-related configuration options.
 	IPTables KubeProxyIPTablesConfiguration
+	// ipvs contains ipvs-related configuration options.
+	IPVS KubeProxyIPVSConfiguration
 	// oomScoreAdj is the oom-score-adj value for kube-proxy process. Values must be within
 	// the range [-1000, 1000]
 	OOMScoreAdj *int32
@@ -167,8 +180,6 @@ const (
 	// dropped by the container bridge.
 	HairpinNone = "none"
 )
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // A configuration field should go in KubeletFlags instead of KubeletConfiguration if any of these are true:
 // - its value will never, or cannot safely be changed during the lifetime of a node
@@ -567,8 +578,6 @@ type KubeletAnonymousAuthentication struct {
 	Enabled bool
 }
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
 type KubeSchedulerConfiguration struct {
 	metav1.TypeMeta
 
@@ -655,8 +664,6 @@ type GroupResource struct {
 	// resource is the resource portion of the GroupResource.
 	Resource string
 }
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type KubeControllerManagerConfiguration struct {
 	metav1.TypeMeta

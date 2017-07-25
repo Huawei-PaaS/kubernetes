@@ -89,6 +89,7 @@ chaos-chance
 cidr-allocator-type
 clean-start
 cleanup-iptables
+cleanup-proxyrules
 client-ca-file
 client-certificate
 client-key
@@ -359,6 +360,9 @@ iptables-drop-bit
 iptables-masquerade-bit
 iptables-min-sync-period
 iptables-sync-period
+ipvs-min-sync-period
+ipvs-scheduler
+ipvs-sync-period
 ir-data-source
 ir-dbname
 ir-hawkular
@@ -449,7 +453,6 @@ log-flush-frequency
 log-lines-total
 logexporter-gcs-path
 long-running-request-regexp
-low-diskspace-threshold-mb
 make-iptables-util-chains
 make-symlinks
 manifest-url
@@ -521,7 +524,6 @@ oidc-issuer-url
 oidc-username-claim
 only-idl
 oom-score-adj
-outofdisk-transition-frequency
 output-base
 output-directory
 output-file-base
