@@ -46,7 +46,6 @@ audit-log-maxage
 audit-log-maxbackup
 audit-log-maxsize
 audit-log-path
-audit-policy-file
 audit-webhook-config-file
 audit-webhook-mode
 authentication-kubeconfig
@@ -89,6 +88,7 @@ chaos-chance
 cidr-allocator-type
 clean-start
 cleanup-iptables
+cleanup-proxyrules
 client-ca-file
 client-certificate
 client-key
@@ -187,7 +187,6 @@ docker-exec-handler
 docker-password
 docker-server
 docker-username
-dockershim-checkpoint-dir
 driver-port
 drop-embedded-fields
 dry-run
@@ -335,7 +334,6 @@ http-port
 ignore-daemonsets
 ignore-not-found
 image-config-file
-image-description
 image-gc-high-threshold
 image-gc-low-threshold
 image-project
@@ -348,6 +346,7 @@ include-extended-apis
 initial-sync-timeout
 input-base
 input-dirs
+insecure-allow-any-token
 insecure-bind-address
 insecure-experimental-approve-all-kubelet-csrs-for-group
 insecure-port
@@ -359,6 +358,9 @@ iptables-drop-bit
 iptables-masquerade-bit
 iptables-min-sync-period
 iptables-sync-period
+ipvs-scheduler
+ipvs-min-sync-period
+ipvs-sync-period
 ir-data-source
 ir-dbname
 ir-hawkular
@@ -447,7 +449,6 @@ load-balancer-ip
 lock-file
 log-flush-frequency
 log-lines-total
-logexporter-gcs-path
 long-running-request-regexp
 low-diskspace-threshold-mb
 make-iptables-util-chains
@@ -472,7 +473,19 @@ max-outgoing-qps
 max-pods
 max-requests-inflight
 max-unavailable
-metrics-bind-address
+mesos-authentication-principal
+mesos-authentication-provider
+mesos-authentication-secret-file
+mesos-cgroup-prefix
+mesos-default-pod-roles
+mesos-executor-cpus
+mesos-executor-mem
+mesos-framework-roles
+mesos-generate-task-discovery
+mesos-launch-grace-period
+mesos-master
+mesos-sandbox-overlay
+mesos-user
 metrics-path
 min-available
 minimum-container-ttl-duration
@@ -526,7 +539,6 @@ output-base
 output-directory
 output-file-base
 output-package
-output-patch
 output-print-type
 output-version
 out-version
@@ -674,8 +686,6 @@ system-cgroups
 system-pods-startup-timeout
 system-reserved
 system-reserved-cgroup
-system-spec-file
-system-spec-name
 system-validate-mode
 target-port
 target-ram-mb
