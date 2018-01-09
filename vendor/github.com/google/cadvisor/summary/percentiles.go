@@ -130,13 +130,16 @@ func NewResource(size int) *resource {
 func GetDerivedPercentiles(stats []*info.Usage) info.Usage {
 	cpu := NewResource(len(stats))
 	memory := NewResource(len(stats))
+	nwtwork := NewResource(len(stats))
 	for _, stat := range stats {
 		cpu.Add(stat.Cpu)
 		memory.Add(stat.Memory)
+		nwtwork.Add(stat.Network)
 	}
 	usage := info.Usage{}
 	usage.Cpu = cpu.GetAllPercentiles()
 	usage.Memory = memory.GetAllPercentiles()
+	usage.Network = nwtwork.GetAllPercentiles()
 	return usage
 }
 
@@ -174,6 +177,7 @@ func GetMinutePercentiles(stats []*secondSample) info.Usage {
 	lastSample := secondSample{}
 	cpu := NewResource(len(stats))
 	memory := NewResource(len(stats))
+	network := NewResource(len(stats))
 	for _, stat := range stats {
 		if !lastSample.Timestamp.IsZero() {
 			cpuRate, err := getCpuRate(*stat, lastSample)
@@ -182,8 +186,10 @@ func GetMinutePercentiles(stats []*secondSample) info.Usage {
 			}
 			cpu.AddSample(cpuRate)
 			memory.AddSample(stat.Memory)
+			network.AddSample(stat.Network)
 		} else {
 			memory.AddSample(stat.Memory)
+			network.AddSample(stat.Network)
 		}
 		lastSample = *stat
 	}
@@ -192,5 +198,6 @@ func GetMinutePercentiles(stats []*secondSample) info.Usage {
 		PercentComplete: percent,
 		Cpu:             cpu.GetAllPercentiles(),
 		Memory:          memory.GetAllPercentiles(),
+		Network:         network.GetAllPercentiles(),
 	}
 }

@@ -34,11 +34,13 @@ type secondSample struct {
 	Timestamp time.Time // time when the sample was recorded.
 	Cpu       uint64    // cpu usage
 	Memory    uint64    // memory usage
+	Network   uint64   // network IO Tx Bytes
 }
 
 type availableResources struct {
 	Cpu    bool
 	Memory bool
+	Network bool
 }
 
 type StatsSummary struct {
@@ -65,6 +67,9 @@ func (s *StatsSummary) AddSample(stat v1.ContainerStats) error {
 	}
 	if s.available.Memory {
 		sample.Memory = stat.Memory.WorkingSet
+	}
+	if s.available.Network {
+		sample.Network = stat.Network.InterfaceStats.TxBytes
 	}
 	s.secondSamples = append(s.secondSamples, &sample)
 	s.updateLatestUsage()
@@ -101,6 +106,7 @@ func (s *StatsSummary) updateLatestUsage() {
 	}
 	latest := s.secondSamples[numStats-1]
 	usage.Memory = latest.Memory
+	usage.Network = latest.Network
 	if numStats > 1 {
 		previous := s.secondSamples[numStats-2]
 		cpu, err := getCpuRate(*latest, *previous)
@@ -177,7 +183,10 @@ func New(spec v1.ContainerSpec) (*StatsSummary, error) {
 	if spec.HasMemory {
 		summary.available.Memory = true
 	}
-	if !summary.available.Cpu && !summary.available.Memory {
+	if spec.HasNetwork {
+		summary.available.Network = true
+	}
+	if !summary.available.Cpu && !summary.available.Memory && !summary.available.Network {
 		return nil, fmt.Errorf("none of the resources are being tracked.")
 	}
 	summary.minuteSamples = NewSamplesBuffer(60 /* one hour */)

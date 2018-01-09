@@ -255,3 +255,7 @@ func (cc *cadvisorClient) HasDedicatedImageFs() (bool, error) {
 	}
 	return imageFsInfo.Device != rootFsInfo.Device, nil
 }
+
+func (cc *cadvisorClient) DerivedStats(name string, options cadvisorapiv2.RequestOptions) (map[string]cadvisorapiv2.DerivedStats, error) {
+	return cc.GetDerivedStats(name, options)
+}

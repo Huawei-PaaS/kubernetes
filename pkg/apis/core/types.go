@@ -4575,3 +4575,35 @@ const (
 	// DefaultHardPodAffinityWeight defines the weight of the implicit PreferredDuringScheduling affinity rule.
 	DefaultHardPodAffinitySymmetricWeight int32 = 1
 )
+
+type SlaProfile struct {
+	//Spec           SlaSpec
+	SlaSpec        map[string]float32
+	AppClass       AppClass
+	TestDimensions []TestDimension
+	WorkLoads      string
+}
+
+type SlaSpecType string
+
+const (
+	SlaSpecQPS SlaSpecType = "targetQPS"
+	SlaSpecRT  SlaSpecType = "targetRT"
+)
+
+type AppClass string
+
+const (
+	AppClassService AppClass = "service"
+	AppClassJob     AppClass = "job"
+)
+
+type TestDimension string
+
+const (
+	TestScaleUp       TestDimension = "scale-up"
+	TestScaleOut      TestDimension = "scale-out"
+	TestInterference  TestDimension = "interference"
+	TestNetworkIO     TestDimension = "network-io"
+	TestHeterogeneity TestDimension = "heterogeneity"
+)

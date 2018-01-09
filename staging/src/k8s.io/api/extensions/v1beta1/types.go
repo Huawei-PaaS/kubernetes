@@ -125,6 +125,9 @@ type Deployment struct {
 
 // DeploymentSpec is the specification of the desired behavior of the Deployment.
 type DeploymentSpec struct {
+	// SLA Requirements for user's application
+	Sla *v1.SlaProfile `json:"sla,omitempty"`
+
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
 	// +optional

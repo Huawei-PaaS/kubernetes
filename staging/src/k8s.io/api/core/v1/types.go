@@ -3817,6 +3817,17 @@ type NodeSystemInfo struct {
 	Architecture string `json:"architecture" protobuf:"bytes,10,opt,name=architecture"`
 }
 
+const (
+	CpuSecondaryAmount = "cpuSecondaryAmount"
+	MemSecondaryAmount = "memSecondaryAmount"
+	IsSecondary        = "isSecondary"
+	ResourceReclaimable  = "resourceReclaimable"
+)
+
+const (
+	DesiredNetworkIORate = "desiredNetworkIORate"
+)
+
 // NodeStatus is information about the current status of a node.
 type NodeStatus struct {
 	// Capacity represents the total resources of a node.
@@ -5195,4 +5206,36 @@ const (
 	// Name of header that specifies a request ID used to associate the error
 	// and data streams for a single forwarded connection
 	PortForwardRequestIDHeader = "requestID"
+)
+
+type SlaProfile struct {
+	//Spec           SlaSpec         `json:"slaSpec,omitempty"`
+	SlaSpec        map[string]float32 `json:"slaSpec,omitempty"`
+	AppClass       AppClass           `json:"appClass,omitempty"`
+	TestDimensions []TestDimension    `json:"testDimensions,omitempty"`
+	WorkLoads      string             `json:"workloads,omitempty"`
+}
+
+type SlaSpecType string
+
+const (
+	SlaSpecQPS SlaSpecType = "targetQPS"
+	SlaSpecRT  SlaSpecType = "targetRT"
+)
+
+type AppClass string
+
+const (
+	AppClassService AppClass = "service"
+	AppClassJob     AppClass = "job"
+)
+
+type TestDimension string
+
+const (
+	TestScaleUp       TestDimension = "scale-up"
+	TestScaleOut      TestDimension = "scale-out"
+	TestInterference  TestDimension = "interference"
+	TestNetworkIO     TestDimension = "network-io"
+	TestHeterogeneity TestDimension = "heterogeneity"
 )

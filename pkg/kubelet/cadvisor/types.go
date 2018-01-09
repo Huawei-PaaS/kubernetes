@@ -48,6 +48,9 @@ type Interface interface {
 	// GetFsInfoByFsUUID returns the stats of the filesystem with the specified
 	// uuid.
 	GetFsInfoByFsUUID(uuid string) (cadvisorapiv2.FsInfo, error)
+
+	// Gets summary stats for all containers based on request options.
+	DerivedStats(name string, options cadvisorapiv2.RequestOptions) (map[string]cadvisorapiv2.DerivedStats, error)
 }
 
 // ImageFsInfoProvider informs cAdvisor how to find imagefs for container images.

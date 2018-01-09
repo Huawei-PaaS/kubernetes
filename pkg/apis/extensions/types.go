@@ -92,6 +92,9 @@ type Deployment struct {
 }
 
 type DeploymentSpec struct {
+	// SLA Requirements for user's application
+	Sla *api.SlaProfile
+
 	// Number of desired pods. This is a pointer to distinguish between explicit
 	// zero and not specified. Defaults to 1.
 	// +optional

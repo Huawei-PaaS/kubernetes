@@ -84,3 +84,7 @@ func (cu *cadvisorClient) HasDedicatedImageFs() (bool, error) {
 func (c *cadvisorClient) GetFsInfoByFsUUID(uuid string) (cadvisorapiv2.FsInfo, error) {
 	return cadvisorapiv2.FsInfo{}, nil
 }
+
+func (cc *cadvisorClient) DerivedStats(name string, options cadvisorapiv2.RequestOptions) (map[string]cadvisorapiv2.DerivedStats, error) {
+	return nil, nil
+}

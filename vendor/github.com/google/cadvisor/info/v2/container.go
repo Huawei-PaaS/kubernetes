@@ -177,6 +177,8 @@ type Usage struct {
 	Cpu Percentiles `json:"cpu"`
 	// Mean, Max, and 90p memory size in bytes.
 	Memory Percentiles `json:"memory"`
+	// Mean, Max, and 90p network IO rate in bytes.
+	Network Percentiles `json:"network"`
 }
 
 // latest sample collected for a container.
@@ -185,6 +187,8 @@ type InstantUsage struct {
 	Cpu uint64 `json:"cpu"`
 	// Memory usage in bytes.
 	Memory uint64 `json:"memory"`
+	// Network IO
+	Network uint64 `json:"network"`
 }
 
 type DerivedStats struct {
