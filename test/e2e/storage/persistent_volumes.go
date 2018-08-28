@@ -281,6 +281,7 @@ var _ = utils.SIGDescribe("PersistentVolumes", func() {
 				framework.ExpectNoError(framework.WaitForPodSuccessInNamespace(c, pod.Name, ns))
 
 				By("Deleting the claim")
+				framework.ExpectNoError(framework.DeletePodWithWait(f, c, pod))
 				framework.ExpectNoError(framework.DeletePVCandValidatePV(c, ns, pvc, pv, v1.VolumeAvailable))
 
 				By("Re-mounting the volume.")
@@ -296,6 +297,7 @@ var _ = utils.SIGDescribe("PersistentVolumes", func() {
 				pod, err = c.CoreV1().Pods(ns).Create(pod)
 				Expect(err).NotTo(HaveOccurred())
 				framework.ExpectNoError(framework.WaitForPodSuccessInNamespace(c, pod.Name, ns))
+				framework.ExpectNoError(framework.DeletePodWithWait(f, c, pod))
 				framework.Logf("Pod exited without failure; the volume has been recycled.")
 			})
 		})
