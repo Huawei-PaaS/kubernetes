@@ -1,0 +1,4 @@
+#!/bin/bash
+ROOTPATH=$(cd "$(dirname "$0")"; pwd)
+source ${ROOTPATH}/fuxivolenv/bin/activate
+python ${ROOTPATH}/fuxivol.py $@
