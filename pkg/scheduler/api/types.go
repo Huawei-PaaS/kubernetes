@@ -38,6 +38,13 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
+const (
+	AnnotationResizeResources = "scheduler.alpha.kubernetes.io/resize-resources"
+	ResizeActionUpdate = "UpdatePodForResizing"
+	ResizeActionReschedule = "DeletePodForResizing"
+	ResizeActionNoOp = "PodNotUpdatedByPolicy"
+)
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Policy describes a struct of a policy resource in api.

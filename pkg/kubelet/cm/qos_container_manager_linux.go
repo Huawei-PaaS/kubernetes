@@ -65,6 +65,7 @@ func NewQOSContainerManager(subsystems *CgroupSubsystems, cgroupRoot CgroupName,
 			cgroupRoot: cgroupRoot,
 		}, nil
 	}
+	//glog.Infof("++++++++++++++++++++ %+v", nodeConfig.QOSReserved)
 
 	return &qosContainerManagerImpl{
 		subsystems:    subsystems,
@@ -81,6 +82,7 @@ func (m *qosContainerManagerImpl) GetQOSContainersInfo() QOSContainersInfo {
 func (m *qosContainerManagerImpl) Start(getNodeAllocatable func() v1.ResourceList, activePods ActivePodsFunc) error {
 	cm := m.cgroupManager
 	rootContainer := m.cgroupRoot
+	//glog.Infof("11111111111111111111 %v", rootContainer)
 	if !cm.Exists(rootContainer) {
 		return fmt.Errorf("root container %v doesn't exist", rootContainer)
 	}
@@ -107,6 +109,8 @@ func (m *qosContainerManagerImpl) Start(getNodeAllocatable func() v1.ResourceLis
 			ResourceParameters: resourceParameters,
 		}
 
+		//glog.Infof("22222222222222222222 %v", containerConfig)
+
 		// for each enumerated huge page size, the qos tiers are unbounded
 		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.HugePages) {
 			m.setHugePagesUnbounded(containerConfig)
@@ -114,11 +118,13 @@ func (m *qosContainerManagerImpl) Start(getNodeAllocatable func() v1.ResourceLis
 
 		// check if it exists
 		if !cm.Exists(containerName) {
+		//	glog.Infof("pppppppppppppppppppp %+v", containerConfig)
 			if err := cm.Create(containerConfig); err != nil {
 				return fmt.Errorf("failed to create top level %v QOS cgroup : %v", qosClass, err)
 			}
 		} else {
 			// to ensure we actually have the right state, we update the config on startup
+		//	glog.Infof("qqqqqqqqqqqqqqqqqqqq %+v", containerConfig)
 			if err := cm.Update(containerConfig); err != nil {
 				return fmt.Errorf("failed to update top level %v QOS cgroup : %v", qosClass, err)
 			}
@@ -132,6 +138,7 @@ func (m *qosContainerManagerImpl) Start(getNodeAllocatable func() v1.ResourceLis
 	}
 	m.getNodeAllocatable = getNodeAllocatable
 	m.activePods = activePods
+	//glog.Infof("33333333333333333333 %v", getNodeAllocatable, activePods)
 
 	// update qos cgroup tiers on startup and in periodic intervals
 	// to ensure desired state is in sync with actual state.
@@ -202,6 +209,8 @@ func (m *qosContainerManagerImpl) setMemoryReserve(configs map[v1.PodQOSClass]*C
 		v1.PodQOSGuaranteed: 0,
 		v1.PodQOSBurstable:  0,
 	}
+
+	//glog.Infof("44444444444444444444")
 
 	// Sum the pod limits for pods in each QOS class
 	pods := m.activePods()
@@ -296,7 +305,10 @@ func (m *qosContainerManagerImpl) UpdateCgroups() error {
 		}
 	}
 
+	//glog.Infof("==================== %+v %+v", qosConfigs, kubefeatures.QOSReserved)
+
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.QOSReserved) {
+		//glog.Infof("^^^^^^^^^^^^^")
 		for resource, percentReserve := range m.qosReserved {
 			switch resource {
 			case v1.ResourceMemory:

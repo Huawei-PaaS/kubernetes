@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	//"runtime/debug"
 
 	units "github.com/docker/go-units"
 	"github.com/golang/glog"
@@ -346,6 +347,7 @@ func setSupportedSubsystems(cgroupConfig *libcontainerconfigs.Cgroup) error {
 			glog.V(6).Infof("Unable to find subsystem mount for optional subsystem: %v", sys.Name())
 			continue
 		}
+		//glog.Infof("zzzzzzzzzzzzzz %+v %+v", cgroupConfig.Paths[sys.Name()], cgroupConfig)
 		if err := sys.Set(cgroupConfig.Paths[sys.Name()], cgroupConfig); err != nil {
 			return fmt.Errorf("Failed to set config for supported subsystems : %v", err)
 		}
@@ -399,6 +401,8 @@ func (m *cgroupManagerImpl) toResources(resourceConfig *ResourceConfig) *libcont
 
 // Update updates the cgroup with the specified Cgroup Configuration
 func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
+glog.Warningf("VDBG-cgroup-manager-UPDATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
+//debug.PrintStack()
 	start := time.Now()
 	defer func() {
 		metrics.CgroupManagerLatency.WithLabelValues("update").Observe(metrics.SinceInMicroseconds(start))
@@ -425,7 +429,9 @@ func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && cgroupConfig.ResourceParameters.PodPidsLimit != nil {
 		libcontainerCgroupConfig.PidsLimit = *cgroupConfig.ResourceParameters.PodPidsLimit
 	}
+	libcontainerCgroupConfig.Resources.OomKillDisable = cgroupConfig.ResourceParameters.OomKillDisable
 
+	//glog.Infof("xxxxxxxxxxxxxx CTRCFG: %+v, CTRCFG.RES: %+v", libcontainerCgroupConfig, libcontainerCgroupConfig.Resources)
 	if err := setSupportedSubsystems(libcontainerCgroupConfig); err != nil {
 		return fmt.Errorf("failed to set supported cgroup subsystems for cgroup %v: %v", cgroupConfig.Name, err)
 	}
@@ -434,6 +440,8 @@ func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
 
 // Create creates the specified cgroup
 func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
+glog.Warningf("VDBG-cgroup-manager-CREATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
+//debug.PrintStack()
 	start := time.Now()
 	defer func() {
 		metrics.CgroupManagerLatency.WithLabelValues("create").Observe(metrics.SinceInMicroseconds(start))
@@ -474,6 +482,7 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
 
 	// it may confuse why we call set after we do apply, but the issue is that runc
 	// follows a similar pattern.  it's needed to ensure cpu quota is set properly.
+	//glog.Infof("8888888 calling from Create %+v %+v", cgroupConfig, cgroupConfig.ResourceParameters)
 	m.Update(cgroupConfig)
 
 	return nil

@@ -76,6 +76,8 @@ func (m *podContainerManagerImpl) Exists(pod *v1.Pod) bool {
 func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 	podContainerName, _ := m.GetPodContainerName(pod)
 	// check if container already exist
+        oomKillDisable := pod.ObjectMeta.Annotations["oomKillDisable"]
+glog.Warningf("VDBG-PCML-ENSUREEXISTS: CTRNAME: %s. OOMKill='%s' . POD: %+v", podContainerName, oomKillDisable, pod)
 	alreadyExists := m.Exists(pod)
 	if !alreadyExists {
 		// Create the pod container
@@ -86,7 +88,29 @@ func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
 			containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
 		}
+                containerConfig.ResourceParameters.OomKillDisable = false
+                if oomKillDisable == "true" {
+                        containerConfig.ResourceParameters.OomKillDisable = true
+                }
+		//glog.Infof("000000 create from pcm %+v %+v", containerConfig, containerConfig.ResourceParameters)
 		if err := m.cgroupManager.Create(containerConfig); err != nil {
+			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
+		}
+	} else {
+		// Update the pod container
+		containerConfig := &CgroupConfig{
+			Name:               podContainerName,
+			ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits),
+		}
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
+			containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
+		}
+                containerConfig.ResourceParameters.OomKillDisable = false
+                if oomKillDisable == "true" {
+                        containerConfig.ResourceParameters.OomKillDisable = true
+                }
+		//glog.Infof("000001 update from pcm %+v %+v", containerConfig, containerConfig.ResourceParameters)
+		if err := m.cgroupManager.Update(containerConfig); err != nil {
 			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
 		}
 	}

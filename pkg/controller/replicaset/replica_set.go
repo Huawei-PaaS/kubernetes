@@ -298,6 +298,9 @@ func (rsc *ReplicaSetController) addPod(obj interface{}) {
 func (rsc *ReplicaSetController) updatePod(old, cur interface{}) {
 	curPod := cur.(*v1.Pod)
 	oldPod := old.(*v1.Pod)
+	glog.Warningf("VDBG-updatePod: OLDPod: %#v", oldPod)
+	glog.Warningf("VDBG-updatePod: CURRPod: %#v", curPod)
+
 	if curPod.ResourceVersion == oldPod.ResourceVersion {
 		// Periodic resync will send update events for all known pods.
 		// Two different versions of the same pod will always have different RVs.

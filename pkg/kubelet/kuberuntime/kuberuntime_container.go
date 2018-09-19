@@ -40,6 +40,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
+	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/types"
@@ -374,6 +375,7 @@ func (m *kubeGenericRuntimeManager) readLastStringFromContainerLogs(path string)
 
 // getPodContainerStatuses gets all containers' statuses for the pod.
 func (m *kubeGenericRuntimeManager) getPodContainerStatuses(uid kubetypes.UID, name, namespace string) ([]*kubecontainer.ContainerStatus, error) {
+	//glog.Warningf("VDBG-getPodContainerStatuses: %s", name)
 	// Select all containers of the given pod.
 	containers, err := m.runtimeService.ListContainers(&runtimeapi.ContainerFilter{
 		LabelSelector: map[string]string{types.KubernetesPodUIDLabel: string(uid)},
@@ -612,6 +614,58 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 		syncResults = append(syncResults, containerResult)
 	}
 	return
+}
+
+func (m *kubeGenericRuntimeManager) updateContainer(pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, resources v1.ResourceRequirements) error {
+	var containerSpec *v1.Container
+	if pod != nil {
+		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
+			return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q",
+				containerName, containerID.String(), format.Pod(pod))
+		}
+	} else {
+		// Restore necessary information if one of the specs is nil.
+		restoredPod, restoredContainer, err := m.restoreSpecsFromContainerLabels(containerID)
+		if err != nil {
+			return err
+		}
+		pod, containerSpec = restoredPod, restoredContainer
+	}
+
+	//glog.Warningf("VDBG-updateContainer: pod: %s , container: %s , ID: %#v", pod.Name, containerName, containerID)
+
+	var containerResources runtimeapi.LinuxContainerResources
+	cpuRequest := int64(0)
+	cpuLimit := int64(0)
+	memoryLimit := int64(0)
+	if cpuRequests, found := resources.Requests[v1.ResourceCPU]; found {
+		cpuRequest = cpuRequests.Value()
+	}
+	if cpuLimits, found := resources.Limits[v1.ResourceCPU]; found {
+		cpuLimit = cpuLimits.Value()
+	}
+	if memoryLimits, found := resources.Limits[v1.ResourceMemory]; found {
+		memoryLimit = memoryLimits.Value()
+	}
+
+	containerResources.CpuShares = int64(cm.MilliCPUToShares(cpuRequest * 1000))
+	cpuQuota, cpuPeriod := cm.MilliCPUToQuota(cpuLimit * 1000)
+	containerResources.CpuPeriod = int64(cpuPeriod)
+	containerResources.CpuQuota = cpuQuota
+	containerResources.MemoryLimitInBytes = memoryLimit
+
+	glog.Warningf("VDBG-updateContainer: containerName: %s. RES: %#v", containerName, containerResources)
+
+	err := m.runtimeService.UpdateContainerResources(containerID.ID, &containerResources)
+	if err != nil {
+		glog.Errorf("Container %q UpdateResources failed with error: %v", containerID.String(), err)
+	}
+
+	message := fmt.Sprintf("Updated resources for container id %s", containerID.String())
+	m.recordContainerEvent(pod, containerSpec, containerID.ID, v1.EventTypeNormal, events.UpdatedContainer, message)
+	m.containerRefManager.ClearRef(containerID)
+
+	return err
 }
 
 // pruneInitContainersBeforeStart ensures that before we begin creating init

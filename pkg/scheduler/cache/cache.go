@@ -17,15 +17,18 @@ limitations under the License.
 package cache
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
+//	"runtime/debug"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/pkg/scheduler/api"
 
 	"github.com/golang/glog"
 	policy "k8s.io/api/policy/v1beta1"
@@ -237,20 +240,114 @@ func (cache *schedulerCache) addPod(pod *v1.Pod) {
 		n = NewNodeInfo()
 		cache.nodes[pod.Spec.NodeName] = n
 	}
+glog.Warningf("VDBG-cache-addPod: Pod: %v", pod.Name)
 	n.AddPod(pod)
 }
 
-// Assumes that lock is already acquired.
-func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
-	if err := cache.removePod(oldPod); err != nil {
-		return err
+// this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
+func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[string]v1.Container, *Resource, error) {
+	var resizeContainers []v1.Container
+
+	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
+		return nil, nil, err
 	}
-	cache.addPod(newPod)
+
+	resizeContainersMap := make(map[string]v1.Container)
+	for _, resizeContainer := range resizeContainers {
+		resizeContainersMap[resizeContainer.Name] = resizeContainer
+	}
+
+	podResource := &Resource{}
+	for _, container := range pod.Spec.Containers {
+		containerResourcesRequests := container.Resources.Requests
+		resizeContainer, ok := resizeContainersMap[container.Name]
+		if ok {
+			containerResourcesRequests = resizeContainer.Resources.Requests
+		}
+glog.Warningf("VDBG-cache-getPodResizeRequirements: Pod: %s. Container: %s. CtrRESOURCEREQUESTS: %+v", pod.Name, container.Name, containerResourcesRequests)
+		podResource.Add(containerResourcesRequests)
+	}
+
+glog.Warningf("VDBG-cache-getPodResizeRequirements: Pod: %s podResource: %+v", pod.Name, podResource)
+	return resizeContainersMap, podResource, nil
+}
+
+func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) error {
+	node, ok := cache.nodes[newPod.Spec.NodeName]
+	if !ok {
+		errMsg := fmt.Sprintf("Node %s not found for pod %s", newPod.Spec.NodeName, newPod.Name)
+		glog.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+
+	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResources]; ok {
+glog.Warningf("VDBG-cache-processVSCALE: Pod: %s. Policy: %+v. Annot: %v.", newPod.Name, newPod.Spec.ResizePolicy, resizeRequestAnnotation)
+		if resizeRequestAnnotation == "" {
+			return nil
+		}
+
+		if newPod.Spec.ResizePolicy == v1.ResizePolicyRestart {
+			newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+			return nil
+		}
+
+		if resizeContainersMap, podResource, err := cache.getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
+			allocatable := node.AllocatableResource()
+
+glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_ALLOCATABLE_RESOURCE: %+v (CPU: %d . MEM: %d)", node.allocatableResource, allocatable.MilliCPU, allocatable.Memory)
+glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_REQUESTED_RESOURCE: %+v (CPU: %d . MEM: %d)", node.requestedResource, node.RequestedResource().MilliCPU, node.RequestedResource().Memory)
+glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_NONZERO-REQUEST: %+v", node.nonzeroRequest)
+glog.Warningf("VDBG-cache-processVSCALE: NEWPod: podResource: %v", podResource)
+
+			if (allocatable.MilliCPU > (podResource.MilliCPU + node.RequestedResource().MilliCPU)) &&
+				(allocatable.Memory > (podResource.Memory + node.RequestedResource().Memory)) {
+				// InPlace resizing is possible
+				for i, container := range newPod.Spec.Containers {
+					resizeContainer, ok := resizeContainersMap[container.Name]
+					if ok {
+						newPod.Spec.Containers[i].Resources = resizeContainer.Resources
+					}
+				}
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionUpdate
+			} else {
+				// InPlace resizing is not possible, restart if allowed by policy
+				if newPod.Spec.ResizePolicy == v1.ResizePolicyInPlaceOnly {
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionNoOp
+					errMsg := fmt.Sprintf("In-place resizing of pod %s on node %s failed. Allocatable CPU: %d, Memory: %d",
+								newPod.Name, newPod.Spec.NodeName, allocatable.MilliCPU, allocatable.Memory)
+					glog.Errorf(errMsg)
+					// TODO: Event recorder resize failed
+					return fmt.Errorf(errMsg)
+				}
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+			}
+		} else {
+			return err
+		}
+	}
 	return nil
 }
 
 // Assumes that lock is already acquired.
+func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
+
+glog.Warningf("VDBG-cache-updatePod: OLD_POD: %s (%s)\n   ===>  OLD_POD_ANNOT: %+v\n   ===>  OLD_POD_RES: %+v", oldPod.Name, oldPod.ObjectMeta.ResourceVersion, oldPod.ObjectMeta.Annotations, oldPod.Spec.Containers)
+//debug.PrintStack()
+glog.Warningf("VDBG-cache-updatePod: NEW_POD: %s (%s)\n   ===>  NEW_POD_ANNOT: %+v\n   ===>  NEW_POD_RES: %+v", newPod.Name, newPod.ObjectMeta.ResourceVersion, newPod.ObjectMeta.Annotations, newPod.Spec.Containers)
+//glog.Warningf("VDBG-cache-updatePod: NEW_POD: %+v\n", newPod)
+
+	if err := cache.removePod(oldPod); err != nil {
+		return err
+	}
+	err := cache.processPodResourcesResizeRequest(newPod);
+glog.Warningf("VDBG-cache-updatePod: PROCESSED_NEW_POD: %s\n   ===>  PROCESSED_NEW_POD_ANNOT: %+v\n   ===>  PROCESSED_NEW_POD_RES: %+v", newPod.Name, newPod.ObjectMeta.Annotations, newPod.Spec.Containers)
+	cache.addPod(newPod)
+	return err
+}
+
+// Assumes that lock is already acquired.
 func (cache *schedulerCache) removePod(pod *v1.Pod) error {
+//glog.Warningf("VDBG-cache-removePod: Pod: %s", pod.Name)
 	n := cache.nodes[pod.Spec.NodeName]
 	if err := n.RemovePod(pod); err != nil {
 		return err
@@ -262,6 +359,7 @@ func (cache *schedulerCache) removePod(pod *v1.Pod) error {
 }
 
 func (cache *schedulerCache) AddPod(pod *v1.Pod) error {
+glog.Warningf("VDBG-cache-AddPod: Pod: %v", pod.Name)
 	key, err := getPodKey(pod)
 	if err != nil {
 		return err
@@ -297,6 +395,8 @@ func (cache *schedulerCache) AddPod(pod *v1.Pod) error {
 }
 
 func (cache *schedulerCache) UpdatePod(oldPod, newPod *v1.Pod) error {
+//glog.Warningf("VDBG-cache-UpdatePod: OLDPod: %v", oldPod.Name)
+//glog.Warningf("VDBG-cache-UpdatePod: NEWPod: %v", newPod.Name)
 	key, err := getPodKey(oldPod)
 	if err != nil {
 		return err
@@ -324,6 +424,7 @@ func (cache *schedulerCache) UpdatePod(oldPod, newPod *v1.Pod) error {
 }
 
 func (cache *schedulerCache) RemovePod(pod *v1.Pod) error {
+glog.Warningf("VDBG-cache-RemovePod: Pod: %v", pod.Name)
 	key, err := getPodKey(pod)
 	if err != nil {
 		return err

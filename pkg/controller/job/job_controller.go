@@ -17,6 +17,7 @@ limitations under the License.
 package job
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -27,6 +28,7 @@ import (
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -44,6 +46,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/util/metrics"
+	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 
 	"github.com/golang/glog"
 )
@@ -400,6 +403,88 @@ func (jm *JobController) processNextWorkItem() bool {
 	return true
 }
 
+func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
+	selector, err := metav1.LabelSelectorAsSelector(j.Spec.Selector)
+	if err != nil {
+		return fmt.Errorf("couldn't convert Job selector: %v", err)
+	}
+
+	// If any adoptions are attempted, we should first recheck for deletion
+	// with an uncached quorum read sometime after listing Pods (see #42639).
+	canAdoptFunc := controller.RecheckDeletionTimestamp(func() (metav1.Object, error) {
+		fresh, err := jm.kubeClient.BatchV1().Jobs(j.Namespace).Get(j.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if fresh.UID != j.UID {
+			return nil, fmt.Errorf("original Job %v/%v is gone: got uid %v, wanted %v", j.Namespace, j.Name, fresh.UID, j.UID)
+		}
+		return fresh, nil
+	})
+	cm := controller.NewPodControllerRefManager(jm.podControl, j, selector, controllerKind, canAdoptFunc)
+
+	cMap := make(map[string]*v1.Container)
+	for i, container := range j.Spec.Template.Spec.Containers {
+		cMap[container.Name] = &(j.Spec.Template.Spec.Containers[i])
+	}
+
+	// LIMITATION: update cpu and memory and all other resources at the same time
+	for _, pod := range pods {
+		anno := make(map[string]string)
+		var resourceUpdates []v1.Container
+
+		for cid, container := range pod.Spec.Containers {
+
+			// add annotation to pod if request from job is different
+			hasUpdate := false
+			var c v1.Container
+			if container.Resources.Requests == nil {
+				pod.Spec.Containers[cid].Resources.Requests = make(v1.ResourceList)
+			}
+
+			if !reflect.DeepEqual(container.Resources.Requests, cMap[container.Name].Resources.Requests) {
+				c.Name = container.Name
+				c.Resources.Requests = make(v1.ResourceList)
+				for k, v := range cMap[container.Name].Resources.Requests {
+					if val, has := container.Resources.Requests[k]; !has ||
+						!reflect.DeepEqual(val, k) {
+						c.Resources.Requests[k] = v
+					}
+				}
+				hasUpdate = true
+			}
+
+			if container.Resources.Limits == nil {
+				pod.Spec.Containers[cid].Resources.Limits = make(v1.ResourceList)
+			}
+			if !reflect.DeepEqual(container.Resources.Limits, cMap[container.Name].Resources.Limits) {
+				c.Name = container.Name
+				c.Resources.Limits = make(v1.ResourceList)
+				for k, v := range cMap[container.Name].Resources.Limits {
+					if val, has := container.Resources.Limits[k]; !has ||
+						!reflect.DeepEqual(val, k) {
+						c.Resources.Limits[k] = v
+					}
+				}
+				hasUpdate = true
+			}
+
+			if hasUpdate {
+				resourceUpdates = append(resourceUpdates, c)
+			}
+		}
+
+		if len(resourceUpdates) > 0 {
+			jsonStr, _ := json.Marshal(resourceUpdates)
+			anno[schedulerapi.AnnotationResizeResources] = string(jsonStr)
+			cm.PatchPodResourceAnnotation(pod, anno)
+			glog.V(4).Infof("Adding resource update annotation to pod " + pod.Name)
+		}
+	}
+
+	return nil
+}
+
 // getPodsForJob returns the set of pods that this Job should manage.
 // It also reconciles ControllerRef by adopting/orphaning.
 // Note that the returned Pods are pointers into the cache.
@@ -474,6 +559,20 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
+	err = jm.patchJobResource(&job, pods)
+	if err != nil {
+		return false, err
+	}
+
+	/*
+		if job.Annotations != nil {
+			err = jm.updateJobContainerSepc(&job)
+			if err != nil {
+				return false, err
+			}
+		}
+	*/
 
 	activePods := controller.FilterActivePods(pods)
 	active := int32(len(activePods))
@@ -816,6 +915,38 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 	}
 
 	return active, nil
+}
+
+func (jm *JobController) updateJobContainerSepc(job *batch.Job) error {
+	jobClient := jm.kubeClient.BatchV1().Jobs(job.Namespace)
+	var err error
+	for i := 0; i <= statusUpdateRetries; i = i + 1 {
+
+		var newJob *batch.Job
+		newJob, err = jobClient.Get(job.Name, metav1.GetOptions{})
+		if err != nil {
+			break
+		}
+
+		memQty, _ := resource.ParseQuantity("5Gi")
+		/*
+			newJob.Spec.Template.Spec.Containers[0].Resources.Requests = make(v1.ResourceList)
+			newJob.Spec.Template.Spec.Containers[0].Resources.Requests["memory"] = memQty
+
+			if _, err = jobClient.Update(newJob); err == nil {
+				break
+			}
+		*/
+
+		jsonStr, err := json.Marshal(memQty)
+		patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"counter", "resources":{"requests":{"memory":%s}}}]}}}}`, jsonStr)
+		if _, err = jobClient.Patch(newJob.Name, "application/strategic-merge-patch+json", []byte(patch)); err == nil {
+			break
+		}
+
+	}
+
+	return err
 }
 
 func (jm *JobController) updateJobStatus(job *batch.Job) error {

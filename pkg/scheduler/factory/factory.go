@@ -50,6 +50,7 @@ import (
 	policylisters "k8s.io/client-go/listers/policy/v1beta1"
 	storagelisters "k8s.io/client-go/listers/storage/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
 	"k8s.io/kubernetes/pkg/features"
@@ -105,6 +106,8 @@ type configFactory struct {
 	pdbLister policylisters.PodDisruptionBudgetLister
 	// a means to list all StorageClasses
 	storageClassLister storagelisters.StorageClassLister
+        // Recorder is the EventRecorder to use
+        recorder record.EventRecorder
 
 	// Close this to stop all reflectors
 	StopEverything chan struct{}
@@ -153,6 +156,7 @@ func NewConfigFactory(
 	serviceInformer coreinformers.ServiceInformer,
 	pdbInformer policyinformers.PodDisruptionBudgetInformer,
 	storageClassInformer storageinformers.StorageClassInformer,
+	eventRecorder record.EventRecorder,
 	hardPodAffinitySymmetricWeight int32,
 	enableEquivalenceClassCache bool,
 	disablePreemption bool,
@@ -178,6 +182,7 @@ func NewConfigFactory(
 		statefulSetLister:              statefulSetInformer.Lister(),
 		pdbLister:                      pdbInformer.Lister(),
 		storageClassLister:             storageClassLister,
+		recorder:			eventRecorder,
 		schedulerCache:                 schedulerCache,
 		StopEverything:                 stopEverything,
 		schedulerName:                  schedulerName,
@@ -623,6 +628,7 @@ func (c *configFactory) addPodToCache(obj interface{}) {
 }
 
 func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
+glog.Warningf("\n\nVDBG-updatePodInCache: ================ ENTER ======================")
 	oldPod, ok := oldObj.(*v1.Pod)
 	if !ok {
 		glog.Errorf("cannot convert oldObj to *v1.Pod: %v", oldObj)
@@ -633,16 +639,55 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 		glog.Errorf("cannot convert newObj to *v1.Pod: %v", newObj)
 		return
 	}
+//glog.Warningf("\n--------\nOLD_POD=%+v\n--------\nNEW_POD=%+v\n--------\n", oldPod, newPod)
 
 	// NOTE: Because the scheduler uses snapshots of schedulerCache and the live
 	// version of equivalencePodCache, updates must be written to schedulerCache
 	// before invalidating equivalencePodCache.
-	if err := c.schedulerCache.UpdatePod(oldPod, newPod); err != nil {
-		glog.Errorf("scheduler cache UpdatePod failed: %v", err)
+	updateErr := c.schedulerCache.UpdatePod(oldPod, newPod)
+	if updateErr != nil {
+		glog.Errorf("scheduler cache UpdatePod failed: %v", updateErr)
+	}
+
+	// Call Update only if we modified the pod resources
+	if !reflect.DeepEqual(oldPod, newPod) {
+glog.Warningf("VDBG-updatePodInCache: NEWPod: %v", newPod.Name)
+		resizeRequestAnnotation := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResources]
+		if resizeRequestAnnotation != "" {
+			newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResources] = ""
+			switch resizeRequestAnnotation {
+			case schedulerapi.ResizeActionUpdate:
+				// Case 1. Node has capacity. Update.
+				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
+				if err !=  nil {
+					glog.Errorf("Error updating pod %s for resizing: %+v", newPod.Name, err)
+					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodInPlaceResizeFailed", "Pod %s. Error: %v.", newPod.Name, err)
+				} else {
+					c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "PodInPlaceResizeSuccessful", "Updated Pod %s", updatedPod.Name)
+				}
+glog.Warningf("VDBG-updatePodINCACHE: UPDATE_DONE: err=%+v\n   ===>  POD: %s (%s) -- UPDATED_POD_ANNOT: %+v\n   ===>  UPDATED_POD_RES: %+v", err, updatedPod.Name, updatedPod.ObjectMeta.ResourceVersion, updatedPod.ObjectMeta.Annotations, updatedPod.Spec.Containers)
+			case schedulerapi.ResizeActionReschedule:
+				// Case 2. Node does not have capacity. Delete oldPod, let controller re-create pod.
+				oldPodName := oldPod.Name
+				err := c.client.CoreV1().Pods(oldPod.Namespace).Delete(oldPod.Name, nil)
+				if err !=  nil {
+					glog.Errorf("Error deleting pod %s for resizing: %+v", newPod.Name, err)
+					c.recorder.Eventf(oldPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod: %s", oldPodName)
+				} else {
+					c.recorder.Eventf(nil, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod: %s", oldPodName)
+				}
+glog.Warningf("VDBG-updatePodINCACHE: RESCHEDULE_DONE: DEL err=%v", err)
+			case schedulerapi.ResizeActionNoOp:
+				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRejectedByPolicy", "%v", updateErr)
+			default:
+glog.Warningf("VDBG-updatePodInCache-DEFAULT: NO_ACTION_NEEDED")
+			}
+		}
 	}
 
 	c.invalidateCachedPredicatesOnUpdatePod(newPod, oldPod)
 	c.podQueue.AssignedPodUpdated(newPod)
+glog.Warningf("VDBG-updatePodInCache: ================ EXIT ======================\n\n")
 }
 
 func (c *configFactory) addPodToSchedulingQueue(obj interface{}) {

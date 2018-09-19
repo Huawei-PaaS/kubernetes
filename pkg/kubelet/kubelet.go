@@ -1564,10 +1564,10 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 				if err := kl.containerManager.UpdateQOSCgroups(); err != nil {
 					glog.V(2).Infof("Failed to update QoS cgroups while syncing pod: %v", err)
 				}
-				if err := pcm.EnsureExists(pod); err != nil {
-					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
-					return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
-				}
+			}
+			if err := pcm.EnsureExists(pod); err != nil {
+				kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
+				return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
 			}
 		}
 	}
@@ -1622,6 +1622,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	pullSecrets := kl.getPullSecretsForPod(pod)
 
 	// Call the container runtime's SyncPod callback
+	//glog.Warningf("VDBG-KL-syncPod: %s - Calling RunTime SyncPod", pod.Name)
 	result := kl.containerRuntime.SyncPod(pod, apiPodStatus, podStatus, pullSecrets, kl.backOff)
 	kl.reasonCache.Update(pod.UID, result)
 	if err := result.Error(); err != nil {
@@ -1842,6 +1843,7 @@ func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handle
 			handler.HandlePodAdditions(u.Pods)
 		case kubetypes.UPDATE:
 			glog.V(2).Infof("SyncLoop (UPDATE, %q): %q", u.Source, format.PodsWithDeletiontimestamps(u.Pods))
+			//glog.Warningf("VDBG-syncLoopIteration: UPDATEPod - ENTER")
 			handler.HandlePodUpdates(u.Pods)
 		case kubetypes.REMOVE:
 			glog.V(2).Infof("SyncLoop (REMOVE, %q): %q", u.Source, format.Pods(u.Pods))
@@ -1976,6 +1978,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	sort.Sort(sliceutils.PodsByCreationTime(pods))
 	for _, pod := range pods {
+		glog.Warningf("VDBG-HandlePodADDITIONS: ADDING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
 		existingPods := kl.podManager.GetPods()
 		// Always add the pod to the pod manager. Kubelet relies on the pod
 		// manager as the source of truth for the desired state. If a pod does
@@ -2013,6 +2016,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		glog.Warningf("VDBG-HandlePodUPDATES: UPDATING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
 		kl.podManager.UpdatePod(pod)
 		if kubepod.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)
@@ -2030,6 +2034,7 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		glog.Warningf("VDBG-HandlePodREMOVES: REMOVING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
 		kl.podManager.DeletePod(pod)
 		if kubepod.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)
@@ -2049,6 +2054,7 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		glog.Warningf("VDBG-HandlePodRECONCILE: RECONCILING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
 		// Update the pod in pod manager, status manager will do periodically reconcile according
 		// to the pod manager.
 		kl.podManager.UpdatePod(pod)
@@ -2073,6 +2079,7 @@ func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodSyncs(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		glog.Warningf("VDBG-HandlePodSYNCS: SYNCING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
 		mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
 		kl.dispatchWork(pod, kubetypes.SyncPodSync, mirrorPod, start)
 	}

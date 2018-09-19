@@ -33,6 +33,7 @@ type updatePodFunc func(pod *v1.Pod) error
 // UpdatePodWithRetries updates a pod with given applyUpdate function.
 func UpdatePodWithRetries(podClient v1core.PodInterface, podLister corelisters.PodLister, namespace, name string, applyUpdate updatePodFunc) (*v1.Pod, error) {
 	var pod *v1.Pod
+	glog.Warningf("VDBG-UpdatePodWithRetries: UPDATING POD name: %v", name)
 
 	retryErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
