@@ -661,24 +661,25 @@ glog.Warningf("VDBG-updatePodInCache: NEWPod: %v", newPod.Name)
 				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
 				if err !=  nil {
 					glog.Errorf("Error updating pod %s for resizing: %+v", newPod.Name, err)
-					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodInPlaceResizeFailed", "Pod %s. Error: %v.", newPod.Name, err)
+					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodInPlaceResizeFailed", "Pod %s resizing update error: %v.", newPod.Name, err)
 				} else {
-					c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "PodInPlaceResizeSuccessful", "Updated Pod %s", updatedPod.Name)
+					c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "PodInPlaceResizeSuccessful", "Updated pod %s to resize resources", updatedPod.Name)
 				}
 glog.Warningf("VDBG-updatePodINCACHE: UPDATE_DONE: err=%+v\n   ===>  POD: %s (%s) -- UPDATED_POD_ANNOT: %+v\n   ===>  UPDATED_POD_RES: %+v", err, updatedPod.Name, updatedPod.ObjectMeta.ResourceVersion, updatedPod.ObjectMeta.Annotations, updatedPod.Spec.Containers)
 			case schedulerapi.ResizeActionReschedule:
 				// Case 2. Node does not have capacity. Delete oldPod, let controller re-create pod.
 				oldPodName := oldPod.Name
+				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", oldPodName)
 				err := c.client.CoreV1().Pods(oldPod.Namespace).Delete(oldPod.Name, nil)
 				if err !=  nil {
 					glog.Errorf("Error deleting pod %s for resizing: %+v", newPod.Name, err)
-					c.recorder.Eventf(oldPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod: %s", oldPodName)
+					c.recorder.Eventf(oldPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod %s delete for resizing error: %v", oldPodName, err)
 				} else {
-					c.recorder.Eventf(nil, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod: %s", oldPodName)
+					c.recorder.Eventf(nil, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", oldPodName)
 				}
 glog.Warningf("VDBG-updatePodINCACHE: RESCHEDULE_DONE: DEL err=%v", err)
-			case schedulerapi.ResizeActionNoOp:
-				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRejectedByPolicy", "%v", updateErr)
+			case schedulerapi.ResizeActionNonePerPolicy:
+				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "%v", updateErr)
 			default:
 glog.Warningf("VDBG-updatePodInCache-DEFAULT: NO_ACTION_NEEDED")
 			}

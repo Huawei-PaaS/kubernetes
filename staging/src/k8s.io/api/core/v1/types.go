@@ -2357,7 +2357,7 @@ const (
 // ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
 // ResizePolicyRestart: Scheduler will resize the pod by restarting it.
 // If none of the following policies is specified, the default one
-// is ResizePoliacyInPlacePreferred.
+// is ResizePolicyInPlacePreferred.
 type ResizePolicy string
 
 const (
@@ -2736,10 +2736,6 @@ type PodSpec struct {
 	// +patchMergeKey=name
 	// +patchStrategy=merge
 	Containers []Container `json:"containers" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,2,rep,name=containers"`
-	// Resize policy that controls scheduler pod restart action during vertical scaling / resizing.
-	// Allowed values "InPlacePreferred" (default), "InPlaceOnly", "Restart".
-	// +optional
-	ResizePolicy ResizePolicy `json:"resizePolicy,omitempty" protobuf:"bytes,3,opt,name=resizePolicy,casttype=ResizePolicy"`
 	// Restart policy for all containers within the pod.
 	// One of Always, OnFailure, Never.
 	// Default to Always.

@@ -38,11 +38,17 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
+// Resources resizing policy and request annotations
 const (
-	AnnotationResizeResources = "scheduler.alpha.kubernetes.io/resize-resources"
-	ResizeActionUpdate = "UpdatePodForResizing"
-	ResizeActionReschedule = "DeletePodForResizing"
-	ResizeActionNoOp = "PodNotUpdatedByPolicy"
+	AnnotationResizeResourcesPolicy = "scheduler.alpha.kubernetes.io/resize-resources-policy"
+	AnnotationResizeResources       = "scheduler.alpha.kubernetes.io/resize-resources"
+)
+
+// Resizing action determined by scheduler
+const (
+	ResizeActionUpdate              = "UpdatePodForResizing"
+	ResizeActionReschedule          = "DeletePodForResizing"
+	ResizeActionNonePerPolicy       = "PodNotResizedPerPolicy"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

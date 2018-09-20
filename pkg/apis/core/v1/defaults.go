@@ -167,9 +167,6 @@ func SetDefaults_PodSpec(obj *v1.PodSpec) {
 	if obj.RestartPolicy == "" {
 		obj.RestartPolicy = v1.RestartPolicyAlways
 	}
-	if obj.ResizePolicy == "" {
-		obj.ResizePolicy = v1.ResizePolicyInPlacePreferred
-	}
 	if obj.HostNetwork {
 		defaultHostNetworkPorts(&obj.Containers)
 		defaultHostNetworkPorts(&obj.InitContainers)

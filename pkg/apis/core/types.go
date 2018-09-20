@@ -2129,7 +2129,7 @@ const (
 // ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
 // ResizePolicyRestart: Scheduler will resize the pod by restarting it.
 // If none of the following policies is specified, the default one
-// is ResizePoliacyInPlacePreferred.
+// is ResizePolicyInPlacePreferred.
 type ResizePolicy string
 
 const (
@@ -2487,8 +2487,6 @@ type PodSpec struct {
 	InitContainers []Container
 	// List of containers belonging to the pod.
 	Containers []Container
-	// Optional policy that controls scheduler pod restart action during resizing
-	ResizePolicy ResizePolicy
 	// +optional
 	RestartPolicy RestartPolicy
 	// Optional duration in seconds the pod needs to terminate gracefully. May be decreased in delete request.
