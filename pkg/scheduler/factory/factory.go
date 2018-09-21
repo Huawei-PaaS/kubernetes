@@ -679,7 +679,7 @@ glog.Warningf("VDBG-updatePodINCACHE: UPDATE_DONE: err=%+v\n   ===>  POD: %s (%s
 				}
 glog.Warningf("VDBG-updatePodINCACHE: RESCHEDULE_DONE: DEL err=%v", err)
 			case schedulerapi.ResizeActionNonePerPolicy:
-				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "%v", updateErr)
+				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "Pod %s reschedule for resizing blocked by policy", oldPod.Name)
 			default:
 glog.Warningf("VDBG-updatePodInCache-DEFAULT: NO_ACTION_NEEDED")
 			}

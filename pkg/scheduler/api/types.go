@@ -44,6 +44,21 @@ const (
 	AnnotationResizeResources       = "scheduler.alpha.kubernetes.io/resize-resources"
 )
 
+// ResizePolicy controls how a pod is resized by the scheduler.
+// Only one of the following resize policies may be specified.
+// ResizePolicyInPlacePreferred: Scheduler will try restart-free resizing, failing which it restarts pod.
+// ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
+// ResizePolicyRestart: Scheduler will resize the pod by restarting it.
+// If none of the following policies is specified, the default one
+// is ResizePolicyInPlacePreferred.
+type ResizePolicy string
+
+const (
+        ResizePolicyInPlacePreferred ResizePolicy = "InPlacePreferred"
+        ResizePolicyInPlaceOnly      ResizePolicy = "InPlaceOnly"
+        ResizePolicyRestart          ResizePolicy = "Restart"
+)
+
 // Resizing action determined by scheduler
 const (
 	ResizeActionUpdate              = "UpdatePodForResizing"

@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	utiltesting "k8s.io/client-go/util/testing"
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
@@ -862,6 +863,7 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 			informerFactory.Core().V1().Services(),
 			informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
 			informerFactory.Storage().V1().StorageClasses(),
+			&record.FakeRecorder{},
 			v1.DefaultHardPodAffinitySymmetricWeight,
 			enableEquivalenceCache,
 			false,
