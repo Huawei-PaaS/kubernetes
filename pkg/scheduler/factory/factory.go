@@ -644,9 +644,8 @@ glog.Warningf("\n\nVDBG-updatePodInCache: ================ ENTER ===============
 	// NOTE: Because the scheduler uses snapshots of schedulerCache and the live
 	// version of equivalencePodCache, updates must be written to schedulerCache
 	// before invalidating equivalencePodCache.
-	updateErr := c.schedulerCache.UpdatePod(oldPod, newPod)
-	if updateErr != nil {
-		glog.Errorf("scheduler cache UpdatePod failed: %v", updateErr)
+	if err := c.schedulerCache.UpdatePod(oldPod, newPod); err != nil {
+		glog.Errorf("scheduler cache UpdatePod failed: %v", err)
 	}
 
 	// Call Update only if we modified the pod resources
