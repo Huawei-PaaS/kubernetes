@@ -17,22 +17,27 @@ limitations under the License.
 package ipamperf
 
 import (
+	"time"
+
 	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/kubernetes/pkg/api/testapi"
+)
+
+const (
+	maxCreateRetries = 10
+	retryDelay       = 10 * time.Second
 )
 
 var (
 	baseNodeTemplate = &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "sample-node-",
-		},
-		Spec: v1.NodeSpec{
-			ExternalID: "foo",
 		},
 		Status: v1.NodeStatus{
 			Capacity: v1.ResourceList{
@@ -52,7 +57,7 @@ func deleteNodes(apiURL string, config *Config) {
 	glog.Info("Deleting nodes")
 	clientSet := clientset.NewForConfigOrDie(&restclient.Config{
 		Host:          apiURL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[v1.GroupName].GroupVersion()},
+		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
 		QPS:           float32(config.CreateQPS),
 		Burst:         config.CreateQPS,
 	})
@@ -65,13 +70,23 @@ func deleteNodes(apiURL string, config *Config) {
 func createNodes(apiURL string, config *Config) error {
 	clientSet := clientset.NewForConfigOrDie(&restclient.Config{
 		Host:          apiURL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[v1.GroupName].GroupVersion()},
+		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
 		QPS:           float32(config.CreateQPS),
 		Burst:         config.CreateQPS,
 	})
 	glog.Infof("Creating %d nodes", config.NumNodes)
 	for i := 0; i < config.NumNodes; i++ {
-		if _, err := clientSet.CoreV1().Nodes().Create(baseNodeTemplate); err != nil {
+		var err error
+		for j := 0; j < maxCreateRetries; j++ {
+			if _, err = clientSet.CoreV1().Nodes().Create(baseNodeTemplate); err != nil && errors.IsServerTimeout(err) {
+				glog.Infof("Server timeout creating nodes, retrying after %v", retryDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
+			break
+		}
+		if err != nil {
+			glog.Errorf("Error creating nodes: %v", err)
 			return err
 		}
 	}

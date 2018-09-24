@@ -23,7 +23,7 @@ import (
 	"k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/pkg/scheduler/schedulercache"
+	schedulercache "k8s.io/kubernetes/pkg/scheduler/cache"
 )
 
 func TestCompareNodes(t *testing.T) {
@@ -202,17 +202,17 @@ func TestComparePdbs(t *testing.T) {
 
 	for _, test := range tests {
 		pdbs := []*policy.PodDisruptionBudget{}
-		for _, name := range test.actual {
+		for _, uid := range test.actual {
 			pdb := &policy.PodDisruptionBudget{}
-			pdb.Name = name
+			pdb.UID = types.UID(uid)
 			pdbs = append(pdbs, pdb)
 		}
 
 		cache := make(map[string]*policy.PodDisruptionBudget)
-		for _, name := range test.cached {
+		for _, uid := range test.cached {
 			pdb := &policy.PodDisruptionBudget{}
-			pdb.Name = name
-			cache[name] = pdb
+			pdb.UID = types.UID(uid)
+			cache[uid] = pdb
 		}
 
 		m, r := compare.ComparePdbs(pdbs, cache)

@@ -58,12 +58,12 @@ func StartApiserver() (string, ShutdownFunc) {
 // StartScheduler configures and starts a scheduler given a handle to the clientSet interface
 // and event broadcaster. It returns a handle to the configurator for the running scheduler
 // and the shutdown function to stop it.
-func StartScheduler(clientSet clientset.Interface, enableEquivalenceCache bool) (scheduler.Configurator, ShutdownFunc) {
+func StartScheduler(clientSet clientset.Interface) (scheduler.Configurator, ShutdownFunc) {
 	informerFactory := informers.NewSharedInformerFactory(clientSet, 0)
 
 	evtBroadcaster := record.NewBroadcaster()
 	evtWatch := evtBroadcaster.StartRecordingToSink(&clientv1core.EventSinkImpl{
-		Interface: clientv1core.New(clientSet.CoreV1().RESTClient()).Events("")})
+		Interface: clientSet.CoreV1().Events("")})
 
 	schedulerConfigurator := createSchedulerConfigurator(clientSet, informerFactory)
 
@@ -112,5 +112,6 @@ func createSchedulerConfigurator(
 		informerFactory.Storage().V1().StorageClasses(),
 		v1.DefaultHardPodAffinitySymmetricWeight,
 		utilfeature.DefaultFeatureGate.Enabled(features.EnableEquivalenceClassCache),
+		false,
 	)
 }

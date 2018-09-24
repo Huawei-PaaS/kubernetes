@@ -27,11 +27,10 @@ import (
 
 	"github.com/golang/glog"
 
-	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/controller/nodeipam"
 	"k8s.io/kubernetes/pkg/controller/nodeipam/ipam"
 	"k8s.io/kubernetes/test/integration/util"
@@ -45,7 +44,7 @@ func setupAllocator(apiURL string, config *Config, clusterCIDR, serviceCIDR *net
 
 	clientSet := clientset.NewForConfigOrDie(&restclient.Config{
 		Host:          apiURL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[v1.GroupName].GroupVersion()},
+		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
 		QPS:           float32(config.KubeQPS),
 		Burst:         config.KubeQPS,
 	})
@@ -53,7 +52,7 @@ func setupAllocator(apiURL string, config *Config, clusterCIDR, serviceCIDR *net
 	sharedInformer := informers.NewSharedInformerFactory(clientSet, 1*time.Hour)
 	ipamController, err := nodeipam.NewNodeIpamController(
 		sharedInformer.Core().V1().Nodes(), config.Cloud, clientSet,
-		clusterCIDR, serviceCIDR, subnetMaskSize, true, config.AllocatorType,
+		clusterCIDR, serviceCIDR, subnetMaskSize, config.AllocatorType,
 	)
 	if err != nil {
 		return nil, shutdownFunc, err
@@ -126,9 +125,13 @@ func TestPerformance(t *testing.T) {
 		tests      []*Config
 	)
 
-	for _, numNodes := range []int{10, 100} {
-		for _, alloc := range []ipam.CIDRAllocatorType{ipam.RangeAllocatorType, ipam.CloudAllocatorType, ipam.IPAMFromClusterAllocatorType, ipam.IPAMFromCloudAllocatorType} {
-			tests = append(tests, &Config{AllocatorType: alloc, NumNodes: numNodes, CreateQPS: numNodes, KubeQPS: 10, CloudQPS: 10})
+	if isCustom {
+		tests = append(tests, customConfig)
+	} else {
+		for _, numNodes := range []int{10, 100} {
+			for _, alloc := range []ipam.CIDRAllocatorType{ipam.RangeAllocatorType, ipam.CloudAllocatorType, ipam.IPAMFromClusterAllocatorType, ipam.IPAMFromCloudAllocatorType} {
+				tests = append(tests, &Config{AllocatorType: alloc, NumNodes: numNodes, CreateQPS: numNodes, KubeQPS: 10, CloudQPS: 10})
+			}
 		}
 	}
 

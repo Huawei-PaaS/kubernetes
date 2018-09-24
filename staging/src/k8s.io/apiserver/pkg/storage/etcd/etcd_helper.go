@@ -101,10 +101,6 @@ type etcdHelper struct {
 	cache utilcache.Cache
 }
 
-func init() {
-	metrics.Register()
-}
-
 // Implements storage.Interface.
 func (h *etcdHelper) Versioner() storage.Versioner {
 	return h.versioner
@@ -351,7 +347,10 @@ func (h *etcdHelper) GetToList(ctx context.Context, key string, resourceVersion 
 	metrics.RecordEtcdRequestLatency("get", getTypeName(listPtr), startTime)
 	if err != nil {
 		if etcdutil.IsEtcdNotFound(err) {
-			return nil
+			if etcdErr, ok := err.(etcd.Error); ok {
+				return h.versioner.UpdateList(listObj, etcdErr.Index, "")
+			}
+			return fmt.Errorf("unexpected error from storage: %#v", err)
 		}
 		return toStorageErr(err, key, 0)
 	}

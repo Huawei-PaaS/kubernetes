@@ -19,7 +19,7 @@ package algorithm
 import (
 	"k8s.io/api/core/v1"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
-	"k8s.io/kubernetes/pkg/scheduler/schedulercache"
+	schedulercache "k8s.io/kubernetes/pkg/scheduler/cache"
 )
 
 // SchedulerExtender is an interface for external processes to influence scheduling
@@ -64,6 +64,10 @@ type SchedulerExtender interface {
 
 	// SupportsPreemption returns if the scheduler extender support preemption or not.
 	SupportsPreemption() bool
+
+	// IsIgnorable returns true indicates scheduling should not fail when this extender
+	// is unavailable. This gives scheduler ability to fail fast and tolerate non-critical extenders as well.
+	IsIgnorable() bool
 }
 
 // ScheduleAlgorithm is an interface implemented by things that know how to schedule pods

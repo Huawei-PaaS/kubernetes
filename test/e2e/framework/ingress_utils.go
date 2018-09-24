@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -183,7 +184,7 @@ func CreateIngressComformanceTests(jig *IngressTestJig, ns string, annotations m
 		},
 		{
 			fmt.Sprintf("should terminate TLS for host %v", tlsHost),
-			func() { jig.AddHTTPS(tlsSecretName, tlsHost) },
+			func() { jig.SetHTTPS(tlsSecretName, tlsHost) },
 			fmt.Sprintf("waiting for HTTPS updates to reflect in ingress"),
 		},
 		{
@@ -241,7 +242,7 @@ func CreateIngressComformanceTests(jig *IngressTestJig, ns string, annotations m
 					}
 					ing.Spec.Rules = newRules
 				})
-				jig.AddHTTPS(tlsSecretName, updatedTLSHost)
+				jig.SetHTTPS(tlsSecretName, updatedTLSHost)
 			},
 			fmt.Sprintf("Waiting for updated certificates to accept requests for host %v", updatedTLSHost),
 		})
@@ -864,12 +865,22 @@ func (cont *GCEIngressController) GetFirewallRuleName() string {
 }
 
 // GetFirewallRule returns the firewall used by the GCEIngressController.
+// Causes a fatal error incase of an error.
+// TODO: Rename this to GetFirewallRuleOrDie and similarly rename all other
+// methods here to be consistent with rest of the code in this repo.
 func (cont *GCEIngressController) GetFirewallRule() *compute.Firewall {
-	gceCloud := cont.Cloud.Provider.(*gcecloud.GCECloud)
-	fwName := cont.GetFirewallRuleName()
-	fw, err := gceCloud.GetFirewall(fwName)
+	fw, err := cont.GetFirewallRuleOrError()
 	Expect(err).NotTo(HaveOccurred())
 	return fw
+}
+
+// GetFirewallRule returns the firewall used by the GCEIngressController.
+// Returns an error if that fails.
+// TODO: Rename this to GetFirewallRule when the above method with that name is renamed.
+func (cont *GCEIngressController) GetFirewallRuleOrError() (*compute.Firewall, error) {
+	gceCloud := cont.Cloud.Provider.(*gcecloud.GCECloud)
+	fwName := cont.GetFirewallRuleName()
+	return gceCloud.GetFirewall(fwName)
 }
 
 func (cont *GCEIngressController) deleteFirewallRule(del bool) (msg string) {
@@ -897,41 +908,72 @@ func (cont *GCEIngressController) isHTTPErrorCode(err error, code int) bool {
 }
 
 // BackendServiceUsingNEG returns true only if all global backend service with matching nodeports pointing to NEG as backend
-func (cont *GCEIngressController) BackendServiceUsingNEG(nodeports []string) (bool, error) {
-	return cont.backendMode(nodeports, "networkEndpointGroups")
+func (cont *GCEIngressController) BackendServiceUsingNEG(svcPorts map[string]v1.ServicePort) (bool, error) {
+	return cont.backendMode(svcPorts, "networkEndpointGroups")
 }
 
-// BackendServiceUsingIG returns true only if all global backend service with matching nodeports pointing to IG as backend
-func (cont *GCEIngressController) BackendServiceUsingIG(nodeports []string) (bool, error) {
-	return cont.backendMode(nodeports, "instanceGroups")
+// BackendServiceUsingIG returns true only if all global backend service with matching svcPorts pointing to IG as backend
+func (cont *GCEIngressController) BackendServiceUsingIG(svcPorts map[string]v1.ServicePort) (bool, error) {
+	return cont.backendMode(svcPorts, "instanceGroups")
 }
 
-func (cont *GCEIngressController) backendMode(nodeports []string, keyword string) (bool, error) {
+func (cont *GCEIngressController) backendMode(svcPorts map[string]v1.ServicePort, keyword string) (bool, error) {
 	gceCloud := cont.Cloud.Provider.(*gcecloud.GCECloud)
 	beList, err := gceCloud.ListGlobalBackendServices()
 	if err != nil {
 		return false, fmt.Errorf("failed to list backend services: %v", err)
 	}
 
+	hcList, err := gceCloud.ListHealthChecks()
+	if err != nil {
+		return false, fmt.Errorf("failed to list health checks: %v", err)
+	}
+
+	uid := cont.UID
+	if len(uid) > 8 {
+		uid = uid[:8]
+	}
+
 	matchingBackendService := 0
-	for _, bs := range beList {
+	for svcName, sp := range svcPorts {
 		match := false
-		for _, np := range nodeports {
-			// Warning: This assumes backend service naming convention includes nodeport in the name
-			if strings.Contains(bs.Name, np) {
+		bsMatch := &compute.BackendService{}
+		// Non-NEG BackendServices are named with the Nodeport in the name.
+		// NEG BackendServices' names contain the a sha256 hash of a string.
+		negString := strings.Join([]string{uid, cont.Ns, svcName, sp.TargetPort.String()}, ";")
+		negHash := fmt.Sprintf("%x", sha256.Sum256([]byte(negString)))[:8]
+		for _, bs := range beList {
+			if strings.Contains(bs.Name, strconv.Itoa(int(sp.NodePort))) ||
+				strings.Contains(bs.Name, negHash) {
 				match = true
+				bsMatch = bs
 				matchingBackendService += 1
+				break
 			}
 		}
+
 		if match {
-			for _, be := range bs.Backends {
+			for _, be := range bsMatch.Backends {
 				if !strings.Contains(be.Group, keyword) {
 					return false, nil
 				}
 			}
+
+			// Check that the correct HealthCheck exists for the BackendService
+			hcMatch := false
+			for _, hc := range hcList {
+				if hc.Name == bsMatch.Name {
+					hcMatch = true
+					break
+				}
+			}
+
+			if !hcMatch {
+				return false, fmt.Errorf("missing healthcheck for backendservice: %v", bsMatch.Name)
+			}
 		}
 	}
-	return matchingBackendService == len(nodeports), nil
+	return matchingBackendService == len(svcPorts), nil
 }
 
 // Cleanup cleans up cloud resources.
@@ -1160,7 +1202,7 @@ func (j *IngressTestJig) runCreate(ing *extensions.Ingress) (*extensions.Ingress
 	if err := manifest.IngressToManifest(ing, filePath); err != nil {
 		return nil, err
 	}
-	_, err := runKubemciWithKubeconfig("create", ing.Name, fmt.Sprintf("--ingress=%s", filePath))
+	_, err := RunKubemciWithKubeconfig("create", ing.Name, fmt.Sprintf("--ingress=%s", filePath))
 	return ing, err
 }
 
@@ -1175,7 +1217,7 @@ func (j *IngressTestJig) runUpdate(ing *extensions.Ingress) (*extensions.Ingress
 	if err := manifest.IngressToManifest(ing, filePath); err != nil {
 		return nil, err
 	}
-	_, err := runKubemciWithKubeconfig("create", ing.Name, fmt.Sprintf("--ingress=%s", filePath), "--force")
+	_, err := RunKubemciWithKubeconfig("create", ing.Name, fmt.Sprintf("--ingress=%s", filePath), "--force")
 	return ing, err
 }
 
@@ -1201,18 +1243,44 @@ func (j *IngressTestJig) Update(update func(ing *extensions.Ingress)) {
 	Failf("too many retries updating ingress %s/%s", ns, name)
 }
 
-// AddHTTPS updates the ingress to use this secret for these hosts.
+// AddHTTPS updates the ingress to add this secret for these hosts.
 func (j *IngressTestJig) AddHTTPS(secretName string, hosts ...string) {
-	j.Ingress.Spec.TLS = []extensions.IngressTLS{{Hosts: hosts, SecretName: secretName}}
 	// TODO: Just create the secret in GetRootCAs once we're watching secrets in
 	// the ingress controller.
 	_, cert, _, err := createTLSSecret(j.Client, j.Ingress.Namespace, secretName, hosts...)
 	ExpectNoError(err)
-	j.Logger.Infof("Updating ingress %v to use secret %v for TLS termination", j.Ingress.Name, secretName)
+	j.Logger.Infof("Updating ingress %v to also use secret %v for TLS termination", j.Ingress.Name, secretName)
+	j.Update(func(ing *extensions.Ingress) {
+		ing.Spec.TLS = append(ing.Spec.TLS, extensions.IngressTLS{Hosts: hosts, SecretName: secretName})
+	})
+	j.RootCAs[secretName] = cert
+}
+
+// SetHTTPS updates the ingress to use only this secret for these hosts.
+func (j *IngressTestJig) SetHTTPS(secretName string, hosts ...string) {
+	_, cert, _, err := createTLSSecret(j.Client, j.Ingress.Namespace, secretName, hosts...)
+	ExpectNoError(err)
+	j.Logger.Infof("Updating ingress %v to only use secret %v for TLS termination", j.Ingress.Name, secretName)
 	j.Update(func(ing *extensions.Ingress) {
 		ing.Spec.TLS = []extensions.IngressTLS{{Hosts: hosts, SecretName: secretName}}
 	})
-	j.RootCAs[secretName] = cert
+	j.RootCAs = map[string][]byte{secretName: cert}
+}
+
+// RemoveHTTPS updates the ingress to not use this secret for TLS.
+// Note: Does not delete the secret.
+func (j *IngressTestJig) RemoveHTTPS(secretName string) {
+	newTLS := []extensions.IngressTLS{}
+	for _, ingressTLS := range j.Ingress.Spec.TLS {
+		if secretName != ingressTLS.SecretName {
+			newTLS = append(newTLS, ingressTLS)
+		}
+	}
+	j.Logger.Infof("Updating ingress %v to not use secret %v for TLS termination", j.Ingress.Name, secretName)
+	j.Update(func(ing *extensions.Ingress) {
+		ing.Spec.TLS = newTLS
+	})
+	delete(j.RootCAs, secretName)
 }
 
 // PrepareTLSSecret creates a TLS secret and caches the cert.
@@ -1263,7 +1331,7 @@ func (j *IngressTestJig) runDelete(ing *extensions.Ingress) error {
 	if err := manifest.IngressToManifest(ing, filePath); err != nil {
 		return err
 	}
-	_, err := runKubemciWithKubeconfig("delete", ing.Name, fmt.Sprintf("--ingress=%s", filePath))
+	_, err := RunKubemciWithKubeconfig("delete", ing.Name, fmt.Sprintf("--ingress=%s", filePath))
 	return err
 }
 
@@ -1271,7 +1339,7 @@ func (j *IngressTestJig) runDelete(ing *extensions.Ingress) error {
 // TODO(nikhiljindal): Update this to be able to return hostname as well.
 func getIngressAddressFromKubemci(name string) ([]string, error) {
 	var addresses []string
-	out, err := runKubemciCmd("get-status", name)
+	out, err := RunKubemciCmd("get-status", name)
 	if err != nil {
 		return addresses, err
 	}
@@ -1444,10 +1512,22 @@ func (j *IngressTestJig) GetDefaultBackendNodePort() (int32, error) {
 // by default, so retrieve its nodePort if includeDefaultBackend is true.
 func (j *IngressTestJig) GetIngressNodePorts(includeDefaultBackend bool) []string {
 	nodePorts := []string{}
+	svcPorts := j.GetServicePorts(includeDefaultBackend)
+	for _, svcPort := range svcPorts {
+		nodePorts = append(nodePorts, strconv.Itoa(int(svcPort.NodePort)))
+	}
+	return nodePorts
+}
+
+// GetIngressNodePorts returns related backend services' svcPorts.
+// Current GCE ingress controller allows traffic to the default HTTP backend
+// by default, so retrieve its nodePort if includeDefaultBackend is true.
+func (j *IngressTestJig) GetServicePorts(includeDefaultBackend bool) map[string]v1.ServicePort {
+	svcPorts := make(map[string]v1.ServicePort)
 	if includeDefaultBackend {
 		defaultSvc, err := j.Client.CoreV1().Services(metav1.NamespaceSystem).Get(defaultBackendName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		nodePorts = append(nodePorts, strconv.Itoa(int(defaultSvc.Spec.Ports[0].NodePort)))
+		svcPorts[defaultBackendName] = defaultSvc.Spec.Ports[0]
 	}
 
 	backendSvcs := []string{}
@@ -1462,9 +1542,9 @@ func (j *IngressTestJig) GetIngressNodePorts(includeDefaultBackend bool) []strin
 	for _, svcName := range backendSvcs {
 		svc, err := j.Client.CoreV1().Services(j.Ingress.Namespace).Get(svcName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		nodePorts = append(nodePorts, strconv.Itoa(int(svc.Spec.Ports[0].NodePort)))
+		svcPorts[svcName] = svc.Spec.Ports[0]
 	}
-	return nodePorts
+	return svcPorts
 }
 
 // ConstructFirewallForIngress returns the expected GCE firewall rule for the ingress resource
@@ -1602,7 +1682,7 @@ func generateBacksideHTTPSDeploymentSpec() *extensions.Deployment {
 					Containers: []v1.Container{
 						{
 							Name:  "echoheaders-https",
-							Image: "k8s.gcr.io/echoserver:1.9",
+							Image: "k8s.gcr.io/echoserver:1.10",
 							Ports: []v1.ContainerPort{{
 								ContainerPort: 8443,
 								Name:          "echo-443",
@@ -1627,6 +1707,9 @@ func (j *IngressTestJig) SetUpBacksideHTTPSIngress(cs clientset.Interface, names
 	}
 	ingToCreate := generateBacksideHTTPSIngressSpec(namespace)
 	if staticIPName != "" {
+		if ingToCreate.Annotations == nil {
+			ingToCreate.Annotations = map[string]string{}
+		}
 		ingToCreate.Annotations[IngressStaticIPKey] = staticIPName
 	}
 	ingCreated, err := j.runCreate(ingToCreate)

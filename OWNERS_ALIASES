@@ -5,6 +5,7 @@ aliases:
     - k82cn
     - timothysc
     - wojtek-t
+    - aveshagarwal
   sig-scheduling:
     - bsalamat
     - davidopp
@@ -38,12 +39,12 @@ aliases:
     - eparis
     - ericchiang
     - ghodss
+    - juanvallejo
     - mengqiy
     - rootfs
     - shiywang
     - smarterclayton
     - soltysh
-    - sttts
   sig-testing-reviewers:
     - fejta
     - ixdy
@@ -91,6 +92,7 @@ aliases:
     - mrhohn
     - nicksardo
     - thockin
+    - rramkumar1
   sig-apps-reviewers:
     - enisoc
     - erictune
@@ -184,6 +186,7 @@ aliases:
     - cmluciano
     - bsalamat
     - m1093782566
+    - tallclair
   api-approvers:
     - erictune
     - lavalamp

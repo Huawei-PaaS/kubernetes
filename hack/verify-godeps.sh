@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2015 The Kubernetes Authors.
 #
@@ -35,7 +35,7 @@ kube::util::ensure_godep_version
 
 if [[ -z ${TMP_GOPATH:-} ]]; then
   # Create a nice clean place to put our new godeps
-  _tmpdir="$(mktemp -d -t gopath.XXXXXX)"
+  _tmpdir="$(kube::realpath $(mktemp -d -t gopath.XXXXXX))"
 else
   # reuse what we might have saved previously
   _tmpdir="${TMP_GOPATH}"
@@ -64,6 +64,7 @@ _kubetmp="${_kubetmp}/kubernetes"
 
 # Do all our work in the new GOPATH
 export GOPATH="${_tmpdir}"
+export PATH="${GOPATH}/bin:${PATH}"
 
 pushd "${_kubetmp}" > /dev/null 2>&1
   # Restore the Godeps into our temp directory
