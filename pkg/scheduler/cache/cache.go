@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/pkg/scheduler/api"
 
 	"github.com/golang/glog"
 	policy "k8s.io/api/policy/v1beta1"
@@ -240,8 +242,98 @@ func (cache *schedulerCache) addPod(pod *v1.Pod) {
 	n.AddPod(pod)
 }
 
+// this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
+func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[string]v1.Container, *Resource, error) {
+	var resizeContainers []v1.Container
+
+	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
+		return nil, nil, err
+	}
+
+	resizeContainersMap := make(map[string]v1.Container)
+	for _, resizeContainer := range resizeContainers {
+		resizeContainersMap[resizeContainer.Name] = resizeContainer
+	}
+
+	podResource := &Resource{}
+	for _, container := range pod.Spec.Containers {
+		containerResourcesRequests := container.Resources.Requests
+		resizeContainer, ok := resizeContainersMap[container.Name]
+		if ok {
+			containerResourcesRequests = resizeContainer.Resources.Requests
+		}
+		podResource.Add(containerResourcesRequests)
+	}
+
+	return resizeContainersMap, podResource, nil
+}
+
+func (cache *schedulerCache) processPodResourcesResizeRequest(oldPod, newPod *v1.Pod) error {
+	node, ok := cache.nodes[newPod.Spec.NodeName]
+	if !ok {
+		errMsg := fmt.Sprintf("Node %s not found for pod %s", newPod.Spec.NodeName, newPod.Name)
+		glog.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+
+	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
+	if _, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy]; ok {
+		resizeResourcesPolicy = api.ResizePolicy(newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy])
+	}
+
+	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResources]; ok {
+		if resizeRequestAnnotation == "" {
+			return nil
+		}
+
+		if resizeResourcesPolicy == api.ResizePolicyRestart {
+			newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+			return nil
+		}
+
+		if resizeContainersMap, podResource, err := cache.getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
+			// Remove oldPod from node for resizing calculations with newPod
+			if err := node.RemovePod(oldPod); err != nil {
+				return err
+			}
+			allocatable := node.AllocatableResource()
+			nodeMilliCPU := node.RequestedResource().MilliCPU
+			nodeMemory := node.RequestedResource().Memory
+			node.AddPod(oldPod)
+
+			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
+				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
+				// InPlace resizing is possible
+				for i, container := range newPod.Spec.Containers {
+					resizeContainer, ok := resizeContainersMap[container.Name]
+					if ok {
+						newPod.Spec.Containers[i].Resources = resizeContainer.Resources
+					}
+				}
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionUpdate
+			} else {
+				// InPlace resizing is not possible, restart if allowed by policy
+				if resizeResourcesPolicy == api.ResizePolicyInPlaceOnly {
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionNonePerPolicy
+					glog.Infof("In-place resizing of pod %s on node %s rejected by policy (%s). Allocatable CPU: %d, Memory: %d. Requested: CPU: %d, Memory %d.",
+							newPod.Name, newPod.Spec.NodeName, resizeResourcesPolicy, allocatable.MilliCPU, allocatable.Memory,
+							podResource.MilliCPU, podResource.Memory)
+					return nil
+				}
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+			}
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
 // Assumes that lock is already acquired.
 func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
+	if err := cache.processPodResourcesResizeRequest(oldPod, newPod); err != nil {
+		return err
+	}
 	if err := cache.removePod(oldPod); err != nil {
 		return err
 	}
