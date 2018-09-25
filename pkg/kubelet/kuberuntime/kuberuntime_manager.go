@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+"strings"
 
 	"github.com/golang/glog"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
@@ -425,6 +426,11 @@ func (m *kubeGenericRuntimeManager) podSandboxChanged(pod *v1.Pod, podStatus *ku
 
 func containerChanged(container *v1.Container, containerStatus *kubecontainer.ContainerStatus) (uint64, uint64, bool) {
 	expectedHash := kubecontainer.HashContainer(container)
+//if strings.Contains(container.Name, "sdjob") {
+//czh := kubecontainer.HashContainerZeroResources(container)
+//eh2 := kubecontainer.HashContainer(container)
+//glog.Warningf("VDBGG: EH: %x CZH: %x  EH2: %x\n-----\nRET_CTR: %#v\n", expectedHash, czh, eh2, container)
+//}
 	return expectedHash, containerStatus.Hash, containerStatus.Hash != expectedHash
 }
 
@@ -444,7 +450,7 @@ func containerSucceeded(c *v1.Container, podStatus *kubecontainer.PodStatus) boo
 func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *kubecontainer.PodStatus) podActions {
 	glog.V(5).Infof("Syncing Pod %q: %+v", format.Pod(pod), pod)
 
-	glog.Warningf("VDBG-computePodActions: Pod: %s", pod.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: Pod: %s", pod.Name) }
 
 	createPodSandbox, attempt, sandboxID := m.podSandboxChanged(pod, podStatus)
 	changes := podActions{
@@ -504,7 +510,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 
 		containerStatus := podStatus.FindContainerStatusByName(container.Name)
 
-		//glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-STATUS: %s", container.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-STATUS: %s. CTR_STS_HASH: %x", container.Name, containerStatus.Hash) }
 		//glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-STATUS: CONTAINER:  %#v", container)
 		//glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-STATUS: CONTAINERSTATUS:  %#v", containerStatus)
 		//glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-STATUS: CONTAINER-RESOURCES:  %#v", container.Resources)
@@ -533,10 +539,9 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		reason := ""
 		restart := shouldRestartOnFailure(pod)
 		if expectedHash, actualHash, changed := containerChanged(&container, containerStatus); changed {
-			//glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-HASH-CHANGED: %s EH=%x AH=%x", container.Name, expectedHash, actualHash)
-			if container.Image == containerStatus.Image {
-				// BUGBUG: This is hacky way of determining hash change is not due to Image change and therefore
-				// due to Resources change (since only these two can change with vertical scaling). FIND BETTER WAY.
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-HASH-CHANGED: %s EH=%x AH=%x CTR_ZRH=%x CTR_STS_ZRH=%x CIMG=%s STSIMG=%s", container.Name, expectedHash, actualHash, kubecontainer.HashContainerZeroResources(&container), containerStatus.HashZeroResources, container.Image, containerStatus.Image) }
+			if kubecontainer.HashContainerZeroResources(&container) == containerStatus.HashZeroResources {
+				// Only the ResourceRequirement has changed. Update container, don't restart it.
 				reason = fmt.Sprintf("Container resource requirements has changed.")
 				changes.ContainersToUpdate[containerStatus.ID] = containerToKillInfo{
 					name:      containerStatus.Name,
@@ -544,7 +549,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 					message:   reason,
 				}
 				keepCount += 1
-				glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-HASH-CHANGED: QUEUING RESOURCE UPDATE.")
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: CHECK-CONTAINER-HASH-CHANGED: QUEUING RESOURCE UPDATE.") }
 				continue
 			} else {
 				reason = fmt.Sprintf("Container spec hash changed (%d vs %d).", actualHash, expectedHash)
@@ -598,7 +603,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 	podContainerChanges := m.computePodActions(pod, podStatus)
 	glog.V(3).Infof("computePodActions got %+v for pod %q", podContainerChanges, format.Pod(pod))
 	if podContainerChanges.CreateSandbox {
-		glog.Warningf("VDBG-SyncPod: CREATE-SANDBOX: %s", pod.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: CREATE-SANDBOX: %s", pod.Name) }
 		ref, err := ref.GetReference(legacyscheme.Scheme, pod)
 		if err != nil {
 			glog.Errorf("Couldn't make a ref to pod %q: '%v'", format.Pod(pod), err)
@@ -612,7 +617,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 
 	// Step 2: Kill the pod if the sandbox has changed.
 	if podContainerChanges.KillPod {
-		glog.Warningf("VDBG-SyncPod: KILLPOD: %s", pod.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: KILLPOD: %s", pod.Name) }
 		if !podContainerChanges.CreateSandbox {
 			glog.V(4).Infof("Stopping PodSandbox for %q because all other containers are dead.", format.Pod(pod))
 		} else {
@@ -632,7 +637,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 	} else {
 		// Step 3: kill any running containers in this pod which are not to keep.
 		for containerID, containerInfo := range podContainerChanges.ContainersToKill {
-			glog.Warningf("VDBG-SyncPod: KILL-CONTAINER: Pod- %s Contaeinr- %s", pod.Name, containerInfo.name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: KILL-CONTAINER: Pod- %s Contaeinr- %s", pod.Name, containerInfo.name) }
 			glog.V(3).Infof("Killing unwanted container %q(id=%q) for pod %q", containerInfo.name, containerID, format.Pod(pod))
 			killContainerResult := kubecontainer.NewSyncResult(kubecontainer.KillContainer, containerInfo.name)
 			result.AddSyncResult(killContainerResult)
@@ -668,7 +673,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 	if podContainerChanges.CreateSandbox {
 		var msg string
 		var err error
-		glog.Warningf("VDBG-SyncPod: CREATE-SANDBOX-2: Pod- %s", pod.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: CREATE-SANDBOX-2: Pod- %s", pod.Name) }
 
 		glog.V(4).Infof("Creating sandbox for pod %q", format.Pod(pod))
 		createSandboxResult := kubecontainer.NewSyncResult(kubecontainer.CreatePodSandbox, format.Pod(pod))
@@ -720,7 +725,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 
 	// Step 5: start the init container.
 	if container := podContainerChanges.NextInitContainerToStart; container != nil {
-		glog.Warningf("VDBG-SyncPod: START-INIT-CONTAINER: Pod- %s Container- %s", pod.Name, container.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: START-INIT-CONTAINER: Pod- %s Container- %s", pod.Name, container.Name) }
 		// Start the next init container.
 		startContainerResult := kubecontainer.NewSyncResult(kubecontainer.StartContainer, container.Name)
 		result.AddSyncResult(startContainerResult)
@@ -745,7 +750,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 	// Step 6: start containers in podContainerChanges.ContainersToStart.
 	for _, idx := range podContainerChanges.ContainersToStart {
 		container := &pod.Spec.Containers[idx]
-		glog.Warningf("VDBG-SyncPod: START-CONTAINER: Pod- %s Container- %s", pod.Name, container.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: START-CONTAINER: Pod- %s Container- %s", pod.Name, container.Name) }
 		startContainerResult := kubecontainer.NewSyncResult(kubecontainer.StartContainer, container.Name)
 		result.AddSyncResult(startContainerResult)
 
@@ -773,7 +778,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 
 	// Step 7: For containers in podContainerChanges.ContainersToUpdate list, "docker update" the resources
 	for containerID, containerInfo := range podContainerChanges.ContainersToUpdate {
-		glog.Warningf("VDBG-SyncPod: UPDATE-CONTAINER: Pod- %s Container- %s. RESOURCES: %#v", pod.Name, containerInfo.name, containerInfo.container.Resources)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: UPDATE-CONTAINER: Pod- %s Container- %s. RESOURCES: %#v", pod.Name, containerInfo.name, containerInfo.container.Resources) }
 		/*killContainerResult := kubecontainer.NewSyncResult(kubecontainer.KillContainer, containerInfo.name)
 		  result.AddSyncResult(killContainerResult) */
 		if err := m.updateContainer(pod, containerID, containerInfo.name, containerInfo.container.Resources); err != nil {

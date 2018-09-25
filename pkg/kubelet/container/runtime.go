@@ -277,6 +277,8 @@ type Container struct {
 	// Hash of the container, used for comparison. Optional for containers
 	// not managed by kubelet.
 	Hash uint64
+	// Hash of the container with 'Resources' field zero'd out.
+	HashZeroResources uint64
 	// State is the state of the container.
 	State ContainerState
 }
@@ -322,6 +324,8 @@ type ContainerStatus struct {
 	ImageID string
 	// Hash of the container, used for comparison.
 	Hash uint64
+	// Hash of the container with 'Resources' field zero'd out.
+	HashZeroResources uint64
 	// Number of times that the container has been restarted.
 	RestartCount int
 	// A string explains why container is in such a status.

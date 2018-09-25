@@ -401,7 +401,7 @@ func (m *cgroupManagerImpl) toResources(resourceConfig *ResourceConfig) *libcont
 
 // Update updates the cgroup with the specified Cgroup Configuration
 func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
-glog.Warningf("VDBG-cgroup-manager-UPDATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
+//glog.Warningf("VDBG-cgroup-manager-UPDATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
 //debug.PrintStack()
 	start := time.Now()
 	defer func() {
@@ -440,7 +440,7 @@ glog.Warningf("VDBG-cgroup-manager-UPDATE: CGNAME: %+v cgroupConfig.RES: %+v", c
 
 // Create creates the specified cgroup
 func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
-glog.Warningf("VDBG-cgroup-manager-CREATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
+//glog.Warningf("VDBG-cgroup-manager-CREATE: CGNAME: %+v cgroupConfig.RES: %+v", cgroupConfig.Name, *cgroupConfig.ResourceParameters)
 //debug.PrintStack()
 	start := time.Now()
 	defer func() {

@@ -18,6 +18,7 @@ package pod
 
 import (
 	"sync"
+"strings"
 
 	"github.com/golang/glog"
 
@@ -173,7 +174,7 @@ func (pm *basicManager) UpdatePod(pod *v1.Pod) {
 // lock.
 func (pm *basicManager) updatePodsInternal(pods ...*v1.Pod) {
 	for _, pod := range pods {
-		glog.Warningf("VDBG-updatePodsInternal: Pod: %s", pod.Name)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-updatePodsInternal: Pod: %s", pod.Name) }
 		if pm.secretManager != nil {
 			// TODO: Consider detecting only status update and in such case do
 			// not register pod, as it doesn't really matter.

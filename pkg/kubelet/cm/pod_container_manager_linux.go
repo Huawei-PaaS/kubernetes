@@ -77,8 +77,8 @@ func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 	podContainerName, _ := m.GetPodContainerName(pod)
 	// check if container already exist
         oomKillDisable := pod.ObjectMeta.Annotations["oomKillDisable"]
-glog.Warningf("VDBG-PCML-ENSUREEXISTS: CTRNAME: %s. OOMKill='%s' . POD: %+v", podContainerName, oomKillDisable, pod)
 	alreadyExists := m.Exists(pod)
+if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-PCML-ENSUREEXISTS: CTRNAME: %s. OOMKill='%s' . POD: %s. EXISTS: %d", podContainerName, oomKillDisable, pod.Name, alreadyExists) }
 	if !alreadyExists {
 		// Create the pod container
 		containerConfig := &CgroupConfig{

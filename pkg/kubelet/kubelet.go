@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+//	"strings"
+
 	"github.com/golang/glog"
 
 	cadvisorapi "github.com/google/cadvisor/info/v1"
@@ -1978,7 +1980,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	sort.Sort(sliceutils.PodsByCreationTime(pods))
 	for _, pod := range pods {
-		glog.Warningf("VDBG-HandlePodADDITIONS: ADDING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
+//if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-HandlePodADDITIONS: ADDING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod) }
 		existingPods := kl.podManager.GetPods()
 		// Always add the pod to the pod manager. Kubelet relies on the pod
 		// manager as the source of truth for the desired state. If a pod does
@@ -2016,7 +2018,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
-		glog.Warningf("VDBG-HandlePodUPDATES: UPDATING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
+//if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-HandlePodUPDATES: UPDATING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod) }
 		kl.podManager.UpdatePod(pod)
 		if kubepod.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)
@@ -2034,7 +2036,7 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
-		glog.Warningf("VDBG-HandlePodREMOVES: REMOVING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
+//if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-HandlePodREMOVES: REMOVING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod) }
 		kl.podManager.DeletePod(pod)
 		if kubepod.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)
@@ -2054,7 +2056,7 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
-		glog.Warningf("VDBG-HandlePodRECONCILE: RECONCILING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
+//if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-HandlePodRECONCILE: RECONCILING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod) }
 		// Update the pod in pod manager, status manager will do periodically reconcile according
 		// to the pod manager.
 		kl.podManager.UpdatePod(pod)
@@ -2079,7 +2081,7 @@ func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodSyncs(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
-		glog.Warningf("VDBG-HandlePodSYNCS: SYNCING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod)
+//if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-HandlePodSYNCS: SYNCING POD: %s (%s)\n--------\nPOD=%+v\n--------\n", pod.Name, pod.ObjectMeta.ResourceVersion, pod) }
 		mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
 		kl.dispatchWork(pod, kubetypes.SyncPodSync, mirrorPod, start)
 	}

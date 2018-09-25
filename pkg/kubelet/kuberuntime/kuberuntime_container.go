@@ -432,13 +432,14 @@ func toKubeContainerStatus(status *runtimeapi.ContainerStatus, runtimeName strin
 			Type: runtimeName,
 			ID:   status.Id,
 		},
-		Name:         labeledInfo.ContainerName,
-		Image:        status.Image.Image,
-		ImageID:      status.ImageRef,
-		Hash:         annotatedInfo.Hash,
-		RestartCount: annotatedInfo.RestartCount,
-		State:        toKubeContainerState(status.State),
-		CreatedAt:    time.Unix(0, status.CreatedAt),
+		Name:              labeledInfo.ContainerName,
+		Image:             status.Image.Image,
+		ImageID:           status.ImageRef,
+		Hash:              annotatedInfo.Hash,
+		HashZeroResources: annotatedInfo.HashZeroResources,
+		RestartCount:      annotatedInfo.RestartCount,
+		State:             toKubeContainerState(status.State),
+		CreatedAt:         time.Unix(0, status.CreatedAt),
 	}
 
 	if status.State != runtimeapi.ContainerState_CONTAINER_CREATED {
@@ -654,7 +655,7 @@ func (m *kubeGenericRuntimeManager) updateContainer(pod *v1.Pod, containerID kub
 	containerResources.CpuQuota = cpuQuota
 	containerResources.MemoryLimitInBytes = memoryLimit
 
-	glog.Warningf("VDBG-updateContainer: containerName: %s. RES: %#v", containerName, containerResources)
+if strings.Contains(containerName, "sdjob") { glog.Warningf("VDBG-updateContainer: containerName: %s. RES: %#v", containerName, containerResources) }
 
 	err := m.runtimeService.UpdateContainerResources(containerID.ID, &containerResources)
 	if err != nil {
