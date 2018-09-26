@@ -75,21 +75,35 @@ func (m *podContainerManagerImpl) Exists(pod *v1.Pod) bool {
 // If the pod level container doesn't already exist it is created.
 func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 	podContainerName, _ := m.GetPodContainerName(pod)
+	containerConfig := &CgroupConfig{
+		Name:               podContainerName,
+		ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits),
+	}
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
+		containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
+	}
+
+	// parse oomKillDisable flag
+	oomKillDisable := pod.ObjectMeta.Annotations["oomKillDisable"]
+	containerConfig.ResourceParameters.OomKillDisable = false
+	if oomKillDisable == "true" {
+		containerConfig.ResourceParameters.OomKillDisable = true
+	}
+
 	// check if container already exist
 	alreadyExists := m.Exists(pod)
 	if !alreadyExists {
-		// Create the pod container
-		containerConfig := &CgroupConfig{
-			Name:               podContainerName,
-			ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits),
-		}
-		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
-			containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
-		}
+		// Create the pod container cgroup
 		if err := m.cgroupManager.Create(containerConfig); err != nil {
 			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
 		}
+	} else {
+		// Update the pod container cgroup
+		if err := m.cgroupManager.Update(containerConfig); err != nil {
+			return fmt.Errorf("failed to update container for %v : %v", podContainerName, err)
+		}
 	}
+
 	// Apply appropriate resource limits on the pod container
 	// Top level qos containers limits are not updated
 	// until we figure how to maintain the desired state in the kubelet.
