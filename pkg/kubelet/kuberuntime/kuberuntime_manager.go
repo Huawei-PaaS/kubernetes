@@ -345,8 +345,8 @@ func (m *kubeGenericRuntimeManager) GetPods(all bool) ([]*kubecontainer.Pod, err
 	return result, nil
 }
 
-// containerToKillInfo contains necessary information to kill a container.
-type containerToKillInfo struct {
+// containerToKillInfo contains necessary information to kill or update a container.
+type containerToUpdateOrKillInfo struct {
 	// The spec of the container.
 	container *v1.Container
 	// The name of the container.
@@ -376,11 +376,11 @@ type podActions struct {
 	// ContainersToKill keeps a map of containers that need to be killed, note that
 	// the key is the container ID of the container, while
 	// the value contains necessary information to kill a container.
-	ContainersToKill map[kubecontainer.ContainerID]containerToKillInfo
+	ContainersToKill map[kubecontainer.ContainerID]containerToUpdateOrKillInfo
 	// ContainersToUpdate keeps a map of containers that need resource update
 	// the key is the container ID of the container, while
 	// the value contains the new resource values to apply to the container.
-	ContainersToUpdate map[kubecontainer.ContainerID]containerToKillInfo
+	ContainersToUpdate map[kubecontainer.ContainerID]containerToUpdateOrKillInfo
 }
 
 // podSandboxChanged checks whether the spec of the pod is changed and returns
@@ -459,8 +459,8 @@ if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: 
 		SandboxID:          sandboxID,
 		Attempt:            attempt,
 		ContainersToStart:  []int{},
-		ContainersToKill:   make(map[kubecontainer.ContainerID]containerToKillInfo),
-		ContainersToUpdate: make(map[kubecontainer.ContainerID]containerToKillInfo),
+		ContainersToKill:   make(map[kubecontainer.ContainerID]containerToUpdateOrKillInfo),
+		ContainersToUpdate: make(map[kubecontainer.ContainerID]containerToUpdateOrKillInfo),
 	}
 
 	// If we need to (re-)create the pod sandbox, everything will need to be
@@ -543,7 +543,7 @@ if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: 
 			if kubecontainer.HashContainerZeroResources(&container) == containerStatus.HashZeroResources {
 				// Only the ResourceRequirement has changed. Update container, don't restart it.
 				reason = fmt.Sprintf("Container resource requirements has changed.")
-				changes.ContainersToUpdate[containerStatus.ID] = containerToKillInfo{
+				changes.ContainersToUpdate[containerStatus.ID] = containerToUpdateOrKillInfo{
 					name:      containerStatus.Name,
 					container: &pod.Spec.Containers[idx],
 					message:   reason,
@@ -575,7 +575,7 @@ if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-computePodActions: 
 			changes.ContainersToStart = append(changes.ContainersToStart, idx)
 		}
 
-		changes.ContainersToKill[containerStatus.ID] = containerToKillInfo{
+		changes.ContainersToKill[containerStatus.ID] = containerToUpdateOrKillInfo{
 			name:      containerStatus.Name,
 			container: &pod.Spec.Containers[idx],
 			message:   message,
@@ -776,7 +776,7 @@ if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: START-CONT
 		}
 	}
 
-	// Step 7: For containers in podContainerChanges.ContainersToUpdate list, "docker update" the resources
+	// Step 7: For containers in podContainerChanges.ContainersToUpdate list, invoke UpdateContainerResources
 	for containerID, containerInfo := range podContainerChanges.ContainersToUpdate {
 if strings.Contains(pod.Name, "sdjob") { glog.Warningf("VDBG-SyncPod: UPDATE-CONTAINER: Pod- %s Container- %s. RESOURCES: %#v", pod.Name, containerInfo.name, containerInfo.container.Resources) }
 		/*killContainerResult := kubecontainer.NewSyncResult(kubecontainer.KillContainer, containerInfo.name)

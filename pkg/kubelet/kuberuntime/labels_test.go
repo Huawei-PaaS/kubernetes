@@ -214,17 +214,18 @@ func TestContainerAnnotations(t *testing.T) {
 		ContainerPorts:            containerPorts,
 		PodDeletionGracePeriod:    pod.DeletionGracePeriodSeconds,
 		PodTerminationGracePeriod: pod.Spec.TerminationGracePeriodSeconds,
-		Hash:                   kubecontainer.HashContainer(container),
-		RestartCount:           restartCount,
-		TerminationMessagePath: container.TerminationMessagePath,
-		PreStopHandler:         container.Lifecycle.PreStop,
+		Hash:                      kubecontainer.HashContainer(container),
+		HashZeroResources:         kubecontainer.HashContainerZeroResources(container),
+		RestartCount:              restartCount,
+		TerminationMessagePath:    container.TerminationMessagePath,
+		PreStopHandler:            container.Lifecycle.PreStop,
 	}
 
 	// Test whether we can get right information from label
 	annotations := newContainerAnnotations(container, pod, restartCount, opts)
 	containerInfo := getContainerInfoFromAnnotations(annotations)
 	if !reflect.DeepEqual(containerInfo, expected) {
-		t.Errorf("expected %v, got %v", expected, containerInfo)
+		t.Errorf("expected %#v, got %#v", expected, containerInfo)
 	}
 	if v, ok := annotations[opts.Annotations[0].Name]; !ok || v != opts.Annotations[0].Value {
 		t.Errorf("expected annotation %s to exist got %v, %v", opts.Annotations[0].Name, ok, v)
@@ -240,10 +241,11 @@ func TestContainerAnnotations(t *testing.T) {
 	expected.PreStopHandler = nil
 	// Because container is changed, the Hash should be updated
 	expected.Hash = kubecontainer.HashContainer(container)
+	expected.HashZeroResources = kubecontainer.HashContainerZeroResources(container)
 	annotations = newContainerAnnotations(container, pod, restartCount, opts)
 	containerInfo = getContainerInfoFromAnnotations(annotations)
 	if !reflect.DeepEqual(containerInfo, expected) {
-		t.Errorf("expected %v, got %v", expected, containerInfo)
+		t.Errorf("expected %#v, got %#v", expected, containerInfo)
 	}
 	if v, ok := annotations[opts.Annotations[0].Name]; !ok || v != opts.Annotations[0].Value {
 		t.Errorf("expected annotation %s to exist got %v, %v", opts.Annotations[0].Name, ok, v)
