@@ -344,8 +344,8 @@ func (m *kubeGenericRuntimeManager) GetPods(all bool) ([]*kubecontainer.Pod, err
 	return result, nil
 }
 
-// containerToKillInfo contains necessary information to kill or update a container.
-type containerToUpdateOrKillInfo struct {
+// containerToKillInfo contains necessary information to kill a container.
+type containerToKillInfo struct {
 	// The spec of the container.
 	container *v1.Container
 	// The name of the container.
@@ -375,11 +375,7 @@ type podActions struct {
 	// ContainersToKill keeps a map of containers that need to be killed, note that
 	// the key is the container ID of the container, while
 	// the value contains necessary information to kill a container.
-	ContainersToKill map[kubecontainer.ContainerID]containerToUpdateOrKillInfo
-	// ContainersToUpdate keeps a map of containers that need resource update
-	// the key is the container ID of the container, while
-	// the value contains the new resource values to apply to the container.
-	ContainersToUpdate map[kubecontainer.ContainerID]containerToUpdateOrKillInfo
+	ContainersToKill map[kubecontainer.ContainerID]containerToKillInfo
 }
 
 // podSandboxChanged checks whether the spec of the pod is changed and returns
@@ -446,13 +442,12 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 
 	createPodSandbox, attempt, sandboxID := m.podSandboxChanged(pod, podStatus)
 	changes := podActions{
-		KillPod:            createPodSandbox,
-		CreateSandbox:      createPodSandbox,
-		SandboxID:          sandboxID,
-		Attempt:            attempt,
-		ContainersToStart:  []int{},
-		ContainersToKill:   make(map[kubecontainer.ContainerID]containerToUpdateOrKillInfo),
-		ContainersToUpdate: make(map[kubecontainer.ContainerID]containerToUpdateOrKillInfo),
+		KillPod:           createPodSandbox,
+		CreateSandbox:     createPodSandbox,
+		SandboxID:         sandboxID,
+		Attempt:           attempt,
+		ContainersToStart: []int{},
+		ContainersToKill:  make(map[kubecontainer.ContainerID]containerToKillInfo),
 	}
 
 	// If we need to (re-)create the pod sandbox, everything will need to be
@@ -524,22 +519,10 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		reason := ""
 		restart := shouldRestartOnFailure(pod)
 		if expectedHash, actualHash, changed := containerChanged(&container, containerStatus); changed {
-			if kubecontainer.HashContainerZeroResources(&container) == containerStatus.HashZeroResources {
-				// Only the ResourceRequirement has changed. Update container, don't restart it.
-				reason = fmt.Sprintf("Container resource requirements has changed.")
-				changes.ContainersToUpdate[containerStatus.ID] = containerToUpdateOrKillInfo{
-					name:      containerStatus.Name,
-					container: &pod.Spec.Containers[idx],
-					message:   reason,
-				}
-				keepCount += 1
-				continue
-			} else {
-				reason = fmt.Sprintf("Container spec hash changed (%d vs %d).", actualHash, expectedHash)
-				// Restart regardless of the restart policy because the container
-				// spec changed.
-				restart = true
-			}
+			reason = fmt.Sprintf("Container spec hash changed (%d vs %d).", actualHash, expectedHash)
+			// Restart regardless of the restart policy because the container
+			// spec changed.
+			restart = true
 		} else if liveness, found := m.livenessManager.Get(containerStatus.ID); found && liveness == proberesults.Failure {
 			// If the container failed the liveness probe, we should kill it.
 			reason = "Container failed liveness probe."
@@ -558,7 +541,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 			changes.ContainersToStart = append(changes.ContainersToStart, idx)
 		}
 
-		changes.ContainersToKill[containerStatus.ID] = containerToUpdateOrKillInfo{
+		changes.ContainersToKill[containerStatus.ID] = containerToKillInfo{
 			name:      containerStatus.Name,
 			container: &pod.Spec.Containers[idx],
 			message:   message,

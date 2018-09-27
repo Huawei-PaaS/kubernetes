@@ -22,7 +22,6 @@ const (
 	StartedContainer        = "Started"
 	FailedToCreateContainer = "Failed"
 	FailedToStartContainer  = "Failed"
-	UpdatedContainer        = "UpdatedResource"
 	KillingContainer        = "Killing"
 	PreemptContainer        = "Preempting"
 	BackOffStartContainer   = "BackOff"
