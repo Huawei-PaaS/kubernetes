@@ -96,6 +96,16 @@ func HashContainer(container *v1.Container) uint64 {
 	return uint64(hash.Sum32())
 }
 
+// HashContainer returns the hash of the container with Resources field zero'd out.
+func HashContainerZeroResources(container *v1.Container) uint64 {
+	resources := container.Resources
+	container.Resources = v1.ResourceRequirements{}
+	hashZeroRes := fnv.New32a()
+	hashutil.DeepHashObject(hashZeroRes, *container)
+	container.Resources = resources
+	return uint64(hashZeroRes.Sum32())
+}
+
 // EnvVarsToMap constructs a map of environment name to value from a slice
 // of env vars.
 func EnvVarsToMap(envs []EnvVar) map[string]string {
@@ -219,12 +229,13 @@ func ConvertPodStatusToRunningPod(runtimeName string, podStatus *PodStatus) Pod 
 			continue
 		}
 		container := &Container{
-			ID:      containerStatus.ID,
-			Name:    containerStatus.Name,
-			Image:   containerStatus.Image,
-			ImageID: containerStatus.ImageID,
-			Hash:    containerStatus.Hash,
-			State:   containerStatus.State,
+			ID:                containerStatus.ID,
+			Name:              containerStatus.Name,
+			Image:             containerStatus.Image,
+			ImageID:           containerStatus.ImageID,
+			Hash:              containerStatus.Hash,
+			HashZeroResources: containerStatus.HashZeroResources,
+			State:             containerStatus.State,
 		}
 		runningPod.Containers = append(runningPod.Containers, container)
 	}

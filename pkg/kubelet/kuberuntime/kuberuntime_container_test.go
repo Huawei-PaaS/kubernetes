@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/api/core/v1"
@@ -69,6 +70,56 @@ func TestRemoveContainer(t *testing.T) {
 	containers, err := fakeRuntime.ListContainers(&runtimeapi.ContainerFilter{Id: containerId})
 	assert.NoError(t, err)
 	assert.Empty(t, containers)
+}
+
+// TestUpdateContainer tests invocation of UpdateContainerResources on a running container
+func TestUpdateContainer(t *testing.T) {
+	fakeRuntime, _, m, err := createTestRuntimeManager()
+	testContainerName :=  "foo"
+	testResources := v1.ResourceRequirements {
+			Requests: v1.ResourceList {
+				v1.ResourceCPU:    resource.MustParse("1000m"),
+				v1.ResourceMemory: resource.MustParse("2000m"),
+			},
+			Limits: v1.ResourceList {
+				v1.ResourceCPU:    resource.MustParse("1000m"),
+				v1.ResourceMemory: resource.MustParse("2000m"),
+			},
+		}
+	testPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "12345678",
+			Name:      "bar",
+			Namespace: "new",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:            testContainerName,
+					Image:           "busybox",
+					ImagePullPolicy: v1.PullIfNotPresent,
+					Resources:       testResources,
+				},
+			},
+		},
+	}
+	testContainerID := kubecontainer.ContainerID{
+		Type: "docker",
+		ID:   testContainerName,
+	}
+
+	// Create fake sandbox and container
+	_, fakeContainers := makeAndSetFakePod(t, m, fakeRuntime, testPod)
+	assert.Equal(t, len(fakeContainers), 1)
+	containerId := fakeContainers[0].Id
+
+	err = m.updateContainer(testPod, testContainerID, testContainerName, testResources)
+	assert.NoError(t, err)
+
+	// Verify container is running
+	containers, err := fakeRuntime.ListContainers(&runtimeapi.ContainerFilter{Id: containerId})
+	assert.NoError(t, err)
+	assert.Equal(t, len(containers), 1)
 }
 
 // TestKillContainer tests killing the container in a Pod.

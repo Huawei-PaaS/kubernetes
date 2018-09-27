@@ -40,6 +40,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
+	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/types"
@@ -430,13 +431,14 @@ func toKubeContainerStatus(status *runtimeapi.ContainerStatus, runtimeName strin
 			Type: runtimeName,
 			ID:   status.Id,
 		},
-		Name:         labeledInfo.ContainerName,
-		Image:        status.Image.Image,
-		ImageID:      status.ImageRef,
-		Hash:         annotatedInfo.Hash,
-		RestartCount: annotatedInfo.RestartCount,
-		State:        toKubeContainerState(status.State),
-		CreatedAt:    time.Unix(0, status.CreatedAt),
+		Name:              labeledInfo.ContainerName,
+		Image:             status.Image.Image,
+		ImageID:           status.ImageRef,
+		Hash:              annotatedInfo.Hash,
+		HashZeroResources: annotatedInfo.HashZeroResources,
+		RestartCount:      annotatedInfo.RestartCount,
+		State:             toKubeContainerState(status.State),
+		CreatedAt:         time.Unix(0, status.CreatedAt),
 	}
 
 	if status.State != runtimeapi.ContainerState_CONTAINER_CREATED {
@@ -612,6 +614,54 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 		syncResults = append(syncResults, containerResult)
 	}
 	return
+}
+
+func (m *kubeGenericRuntimeManager) updateContainer(pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, resources v1.ResourceRequirements) error {
+	var containerSpec *v1.Container
+	if pod != nil {
+		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
+			return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q",
+				containerName, containerID.String(), format.Pod(pod))
+		}
+	} else {
+		// Restore necessary information if one of the specs is nil.
+		restoredPod, restoredContainer, err := m.restoreSpecsFromContainerLabels(containerID)
+		if err != nil {
+			return err
+		}
+		pod, containerSpec = restoredPod, restoredContainer
+	}
+
+	var containerResources runtimeapi.LinuxContainerResources
+	cpuRequest := int64(0)
+	cpuLimit := int64(0)
+	memoryLimit := int64(0)
+	if cpuRequests, found := resources.Requests[v1.ResourceCPU]; found {
+		cpuRequest = cpuRequests.Value()
+	}
+	if cpuLimits, found := resources.Limits[v1.ResourceCPU]; found {
+		cpuLimit = cpuLimits.Value()
+	}
+	if memoryLimits, found := resources.Limits[v1.ResourceMemory]; found {
+		memoryLimit = memoryLimits.Value()
+	}
+
+	containerResources.CpuShares = int64(cm.MilliCPUToShares(cpuRequest * 1000))
+	cpuQuota, cpuPeriod := cm.MilliCPUToQuota(cpuLimit * 1000)
+	containerResources.CpuPeriod = int64(cpuPeriod)
+	containerResources.CpuQuota = cpuQuota
+	containerResources.MemoryLimitInBytes = memoryLimit
+
+	err := m.runtimeService.UpdateContainerResources(containerID.ID, &containerResources)
+	if err != nil {
+		glog.Errorf("Container %q UpdateResources failed with error: %v", containerID.String(), err)
+	}
+
+	message := fmt.Sprintf("Updated resources for container id %s", containerID.String())
+	m.recordContainerEvent(pod, containerSpec, containerID.ID, v1.EventTypeNormal, events.UpdatedContainer, message)
+	m.containerRefManager.ClearRef(containerID)
+
+	return err
 }
 
 // pruneInitContainersBeforeStart ensures that before we begin creating init
