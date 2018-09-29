@@ -755,8 +755,8 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 
 	// Step 7: For containers in podContainerChanges.ContainersToUpdate list, invoke UpdateContainerResources
 	for containerID, containerInfo := range podContainerChanges.ContainersToUpdate {
-		if err := m.updateContainer(pod, containerID, containerInfo.name, containerInfo.container.Resources); err != nil {
-			glog.Errorf("updateContainer %q(id=%q) for pod %q failed: %v", containerInfo.name, containerID, format.Pod(pod), err)
+		if err := m.updateContainerResources(pod, containerID, containerInfo.name, containerInfo.container.Resources); err != nil {
+			glog.Errorf("updateContainerResources %q(id=%q) for pod %q failed: %v", containerInfo.name, containerID, format.Pod(pod), err)
 			return
 		}
 	}

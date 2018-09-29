@@ -113,7 +113,7 @@ func TestUpdateContainer(t *testing.T) {
 	assert.Equal(t, len(fakeContainers), 1)
 	containerId := fakeContainers[0].Id
 
-	err = m.updateContainer(testPod, testContainerID, testContainerName, testResources)
+	err = m.updateContainerResources(testPod, testContainerID, testContainerName, testResources)
 	assert.NoError(t, err)
 
 	// Verify container is running

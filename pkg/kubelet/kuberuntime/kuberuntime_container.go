@@ -616,7 +616,7 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 	return
 }
 
-func (m *kubeGenericRuntimeManager) updateContainer(pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, resources v1.ResourceRequirements) error {
+func (m *kubeGenericRuntimeManager) updateContainerResources(pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, resources v1.ResourceRequirements) error {
 	var containerSpec *v1.Container
 	if pod != nil {
 		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
