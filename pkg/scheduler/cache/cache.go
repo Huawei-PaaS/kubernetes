@@ -257,10 +257,14 @@ func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequest
 
 	podResource := &Resource{}
 	for _, container := range pod.Spec.Containers {
-		containerResourcesRequests := container.Resources.Requests
-		resizeContainer, ok := resizeContainersMap[container.Name]
-		if ok {
-			containerResourcesRequests = resizeContainer.Resources.Requests
+		containerResourcesRequests := v1.ResourceList {
+							v1.ResourceCPU:    container.Resources.Requests[v1.ResourceCPU],
+							v1.ResourceMemory: container.Resources.Requests[v1.ResourceMemory],
+						}
+		if resizeContainer, ok := resizeContainersMap[container.Name]; ok {
+			for k, v := range resizeContainer.Resources.Requests {
+				containerResourcesRequests[k] = v
+			}
 		}
 		podResource.Add(containerResourcesRequests)
 	}
@@ -301,13 +305,23 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(oldPod, newPod *v1
 			nodeMemory := node.RequestedResource().Memory
 			node.AddPod(oldPod)
 
-			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
-				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
+			if ((allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
+				(allocatable.Memory > (podResource.Memory + nodeMemory))) {
 				// InPlace resizing is possible
 				for i, container := range newPod.Spec.Containers {
 					resizeContainer, ok := resizeContainersMap[container.Name]
 					if ok {
-						newPod.Spec.Containers[i].Resources = resizeContainer.Resources
+						// Controller checks ensure pod QoS invariance, just update changed values
+						if (resizeContainer.Resources.Requests != nil) {
+							for k, v := range resizeContainer.Resources.Requests {
+								newPod.Spec.Containers[i].Resources.Requests[k] = v
+							}
+						}
+						if (resizeContainer.Resources.Limits != nil) {
+							for k, v := range resizeContainer.Resources.Limits {
+								newPod.Spec.Containers[i].Resources.Limits[k] = v
+							}
+						}
 					}
 				}
 				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionUpdate
