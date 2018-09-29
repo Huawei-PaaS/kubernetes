@@ -250,7 +250,7 @@ func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequest
 	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
 		return nil, nil, err
 	}
-
+//fmt.Printf("VDBGGG: ANNO: %s. resizeContainers: %#v\n", resizeRequestAnnotation, resizeContainers)
 	resizeContainersMap := make(map[string]v1.Container)
 	for _, resizeContainer := range resizeContainers {
 		resizeContainersMap[resizeContainer.Name] = resizeContainer
@@ -258,10 +258,15 @@ func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequest
 
 	podResource := &Resource{}
 	for _, container := range pod.Spec.Containers {
-		containerResourcesRequests := container.Resources.Requests
-		resizeContainer, ok := resizeContainersMap[container.Name]
-		if ok {
-			containerResourcesRequests = resizeContainer.Resources.Requests
+		containerResourcesRequests := v1.ResourceList {
+							v1.ResourceCPU:    container.Resources.Requests[v1.ResourceCPU],
+							v1.ResourceMemory: container.Resources.Requests[v1.ResourceMemory],
+						}
+//fmt.Printf("VDBGGG22: containerResourceRequests: %#v\n", containerResourcesRequests)
+		if resizeContainer, ok := resizeContainersMap[container.Name]; ok {
+			for k, v := range resizeContainer.Resources.Requests {
+				containerResourcesRequests[k] = v
+			}
 		}
 glog.Warningf("VDBG-cache-getPodResizeRequirements: Pod: %s. Container: %s. CtrRESOURCEREQUESTS: %+v", pod.Name, container.Name, containerResourcesRequests)
 		podResource.Add(containerResourcesRequests)
@@ -296,9 +301,9 @@ glog.Warningf("VDBG-cache-processVSCALE: Pod: %s. Policy: %+v. Annot: %v.", newP
 			return nil
 		}
 
-
 		if resizeContainersMap, podResource, err := cache.getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
 			// Remove oldPod from node for resizing calculations with newPod
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-BEFORE_REMOVE_POD: NAAR: %#v NRRR: %#v\n", node.AllocatableResource(), node.RequestedResource())
 			if err := node.RemovePod(oldPod); err != nil {
 				return err
 			}
@@ -308,16 +313,30 @@ glog.Warningf("VDBG-cache-processVSCALE: Pod: %s. Policy: %+v. Annot: %v.", newP
 glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_ALLOCATABLE_RESOURCE: %+v (CPU: %d . MEM: %d)", node.allocatableResource, allocatable.MilliCPU, allocatable.Memory)
 glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_REQUESTED_RESOURCE: %+v (CPU: %d . MEM: %d)", node.requestedResource, nodeMilliCPU, nodeMemory)
 glog.Warningf("VDBG-cache-processVSCALE: NODE-INFO: NODE_NONZERO-REQUEST: %+v", node.nonzeroRequest)
-glog.Warningf("VDBG-cache-processVSCALE: NEWPod: podResource: %v", podResource)
+fmt.Printf("VDBG-cache-processVSCALE: NODE-INFO: NODE_ALLOCATABLE_RESOURCE: %+v (CPU: %d . MEM: %d)\n", node.allocatableResource, allocatable.MilliCPU, allocatable.Memory)
+fmt.Printf("VDBG-cache-processVSCALE: NODE-INFO: NODE_REQUESTED_RESOURCE: %+v (CPU: %d . MEM: %d)\n", node.requestedResource, nodeMilliCPU, nodeMemory)
+fmt.Printf("VDBG-cache-processVSCALE: NEWPod: podResource: %#v\n", podResource)
 			node.AddPod(oldPod)
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-AFTER_ADD_POD_POD: NAAR: %#v NRRR: %#v\n", node.AllocatableResource(), node.RequestedResource())
 
-			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
-				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
+			if ((allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
+				(allocatable.Memory > (podResource.Memory + nodeMemory))) {
 				// InPlace resizing is possible
 				for i, container := range newPod.Spec.Containers {
 					resizeContainer, ok := resizeContainersMap[container.Name]
 					if ok {
-						newPod.Spec.Containers[i].Resources = resizeContainer.Resources
+fmt.Printf("VDBGVDBG: RESIZE_CONTAINER: %#v\n",resizeContainer)
+						// Controller checks ensure pod QoS invariance, just update changed values
+						if (resizeContainer.Resources.Requests != nil) {
+							for k, v := range resizeContainer.Resources.Requests {
+								newPod.Spec.Containers[i].Resources.Requests[k] = v
+							}
+						}
+						if (resizeContainer.Resources.Limits != nil) {
+							for k, v := range resizeContainer.Resources.Limits {
+								newPod.Spec.Containers[i].Resources.Limits[k] = v
+							}
+						}
 					}
 				}
 				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionUpdate
@@ -343,14 +362,24 @@ glog.Warningf("VDBG-cache-processVSCALE: NEWPod: podResource: %v", podResource)
 func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
 glog.Warningf("VDBG-cache-updatePod: OLD_POD: %s (%s)\n   ===>  OLD_POD_ANNOT: %+v\n   ===>  OLD_POD_RES: %+v\n   ===>  STS: %+v\n", oldPod.Name, oldPod.ObjectMeta.ResourceVersion, oldPod.ObjectMeta.Annotations, oldPod.Spec.Containers, oldPod.Status)
 glog.Warningf("VDBG-cache-updatePod: NEW_POD: %s (%s)\n   ===>  NEW_POD_ANNOT: %+v\n   ===>  NEW_POD_RES: %+v\n   ===>  STS: %+v\n", newPod.Name, newPod.ObjectMeta.ResourceVersion, newPod.ObjectMeta.Annotations, newPod.Spec.Containers, newPod.Status)
+fmt.Printf("VDBG-cache-updatePod: OLD_POD: %s (%s)\n=======================\n   ===>  OLD_POD_ANNOT: %+v\n   ===>  OLD_POD_RES: %+v\n", oldPod.Name, oldPod.ObjectMeta.ResourceVersion, oldPod.ObjectMeta.Annotations, oldPod.Spec.Containers)
+fmt.Printf("VDBG-cache-updatePod: NEW_POD: %s (%s)\n   ===>  NEW_POD_ANNOT: %+v\n   ===>  NEW_POD_RES: %+v\n", newPod.Name, newPod.ObjectMeta.ResourceVersion, newPod.ObjectMeta.Annotations, newPod.Spec.Containers)
+node, _ := cache.nodes[newPod.Spec.NodeName]
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-1111: NAAR: %#v NRRR: %#v\n", node.AllocatableResource(), node.RequestedResource())
 	if err := cache.processPodResourcesResizeRequest(oldPod, newPod); err != nil {
 		return err
 	}
+node2, _ := cache.nodes[newPod.Spec.NodeName]
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-2222: NAAR: %#v NRRR: %#v\n", node2.AllocatableResource(), node2.RequestedResource())
 	if err := cache.removePod(oldPod); err != nil {
 		return err
 	}
-glog.Warningf("VDBG-cache-updatePod: PROCESSED_NEW_POD: %s\n   ===>  PROCESSED_NEW_POD_ANNOT: %+v\n   ===>  PROCESSED_NEW_POD_RES: %+v", newPod.Name, newPod.ObjectMeta.Annotations, newPod.Spec.Containers)
+fmt.Printf("VDBG-cache-updatePod: PROCESSED_NEW_POD: %s\n   ===>  PROCESSED_NEW_POD_ANNOT: %+v\n   ===>  PROCESSED_NEW_POD_RES: %+v\n=======================\n", newPod.Name, newPod.ObjectMeta.Annotations, newPod.Spec.Containers)
+node3, _ := cache.nodes[newPod.Spec.NodeName]
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-3333: NAAR: %#v NRRR: %#v\n", node3.AllocatableResource(), node3.RequestedResource())
 	cache.addPod(newPod)
+node4, _ := cache.nodes[newPod.Spec.NodeName]
+fmt.Printf("VDBG-cache-updatePOD: NODE-INFO-4444: NAAR: %#v NRRR: %#v\n", node4.AllocatableResource(), node4.RequestedResource())
 	return nil
 }
 
