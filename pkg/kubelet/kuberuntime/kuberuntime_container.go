@@ -40,7 +40,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
-	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/types"
@@ -431,14 +430,13 @@ func toKubeContainerStatus(status *runtimeapi.ContainerStatus, runtimeName strin
 			Type: runtimeName,
 			ID:   status.Id,
 		},
-		Name:              labeledInfo.ContainerName,
-		Image:             status.Image.Image,
-		ImageID:           status.ImageRef,
-		Hash:              annotatedInfo.Hash,
-		HashZeroResources: annotatedInfo.HashZeroResources,
-		RestartCount:      annotatedInfo.RestartCount,
-		State:             toKubeContainerState(status.State),
-		CreatedAt:         time.Unix(0, status.CreatedAt),
+		Name:         labeledInfo.ContainerName,
+		Image:        status.Image.Image,
+		ImageID:      status.ImageRef,
+		Hash:         annotatedInfo.Hash,
+		RestartCount: annotatedInfo.RestartCount,
+		State:        toKubeContainerState(status.State),
+		CreatedAt:    time.Unix(0, status.CreatedAt),
 	}
 
 	if status.State != runtimeapi.ContainerState_CONTAINER_CREATED {

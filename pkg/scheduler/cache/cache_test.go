@@ -29,10 +29,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/pkg/scheduler/api"
 	priorityutil "k8s.io/kubernetes/pkg/scheduler/algorithm/priorities/util"
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
 )
@@ -573,6 +575,102 @@ func TestUpdatePod(t *testing.T) {
 			// check after expiration. confirmed pods shouldn't be expired.
 			n := cache.nodes[nodeName]
 			deepEqualWithoutGeneration(t, i, n, tt.wNodeInfo[i-1])
+		}
+	}
+}
+
+// TestUpdatePodResources tests updatePod that requests resource update.
+func TestUpdatePodResources(t *testing.T) {
+	// Enable volumesOnNodeForBalancing to do balanced resource allocation
+	utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%s=true", features.BalanceAttachedNodeVolumes))
+	nodeName := "node"
+	ttl := 10 * time.Second
+	testNode := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+			Status: v1.NodeStatus{
+					Allocatable: v1.ResourceList{
+					v1.ResourceCPU:         resource.MustParse("1000m"),
+					v1.ResourceMemory:	resource.MustParse("2000"),
+					v1.ResourceName("foo"): resource.MustParse("1"),
+				},
+			},
+		}
+
+	oldPod := makeBasePod(t, nodeName, "test", "100m", "500", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}})
+	newPod := makeBasePod(t, nodeName, "test", "100m", "500", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}})
+	oldPod.Name = "test"
+	oldPod.Spec.Containers[0].Name = "test"
+	newPod.Name = "test"
+	newPod.Spec.Containers[0].Name = "test"
+	newPod.ObjectMeta.Annotations = make(map[string]string)
+
+	tests := []struct {
+		TestCaseDesc	string
+		ResizePolicy	string
+		ResizeResource	string
+		ExpectedPod	*v1.Pod
+		ExpectedAction	string
+	}{
+		{
+			"InPlacePreferred - update CPU only, expect in-place resizing",
+			"InPlacePreferred",
+			"[{\"name\":\"test\",\"resources\":{\"requests\":{\"cpu\":\"200m\"}}}]",
+			makeBasePod(t, nodeName, "test", "200m", "500", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}}),
+			"UpdatePodForResizing",
+		},
+		{
+			"InPlacePreferred - update memory only, expect in-place resizing",
+			"InPlacePreferred",
+			"[{\"name\":\"test\",\"resources\":{\"requests\":{\"memory\":\"800\"}}}]",
+			makeBasePod(t, nodeName, "test", "200m", "800", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}}),
+			"UpdatePodForResizing",
+		},
+		{
+			"InPlacePreferred - update CPU and memory, expect in-place resizing",
+			"InPlacePreferred",
+			"[{\"name\":\"test\",\"resources\":{\"requests\":{\"cpu\":\"500m\",\"memory\":\"1000\"}}}]",
+			makeBasePod(t, nodeName, "test", "500m", "1000", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}}),
+			"UpdatePodForResizing",
+		},
+		{
+			"InPlacePreferred - update CPU and memory, expect pod reschedule",
+			"InPlacePreferred",
+			"[{\"name\":\"test\",\"resources\":{\"requests\":{\"cpu\":\"800m\",\"memory\":\"3000\"}}}]",
+			makeBasePod(t, nodeName, "test", "500m", "1000", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}}),
+			"DeletePodForResizing",
+		},
+		//TODO: Add more tests after community review and approval
+	}
+
+	cache := newSchedulerCache(ttl, time.Second, nil)
+	if err := cache.AddPod(oldPod); err != nil {
+		t.Fatalf("AddPod failed: %v", err)
+	}
+	ni := cache.nodes[nodeName]
+	ni.SetNode(testNode)
+
+	for _, tt := range tests {
+		newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy] = tt.ResizePolicy
+		newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = tt.ResizeResource
+
+		for k, _ := range oldPod.Spec.Containers[0].Resources.Requests {
+			oldPod.Spec.Containers[0].Resources.Requests[k] = newPod.Spec.Containers[0].Resources.Requests[k]
+		}
+		tt.ExpectedPod.Spec.Containers[0].Name = "test"
+
+		if err := cache.UpdatePod(oldPod, newPod); err != nil {
+			t.Fatalf("Testcase '%s' - UpdatePod failed: %v", tt.TestCaseDesc, err)
+		}
+		if !reflect.DeepEqual(newPod.Spec.Containers, tt.ExpectedPod.Spec.Containers) {
+			t.Fatalf("Testcase '%s' - Container spec mismatch.\nExpected: %#v.\nActual:   %#v\nDiff: %s",
+					tt.TestCaseDesc, tt.ExpectedPod.Spec.Containers, newPod.Spec.Containers,
+					diff.ObjectDiff(tt.ExpectedPod.Spec.Containers, newPod.Spec.Containers))
+		}
+		if newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] != tt.ExpectedAction {
+			t.Fatalf("Testcase '%s' - resource update action mismatch. Expected: %s. Actual: %s\n",
+					tt.TestCaseDesc, tt.ExpectedAction, newPod.ObjectMeta.Annotations[api.AnnotationResizeResources])
 		}
 	}
 }

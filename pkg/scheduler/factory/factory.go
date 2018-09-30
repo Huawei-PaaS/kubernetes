@@ -50,6 +50,7 @@ import (
 	policylisters "k8s.io/client-go/listers/policy/v1beta1"
 	storagelisters "k8s.io/client-go/listers/storage/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
 	"k8s.io/kubernetes/pkg/features"
@@ -105,6 +106,8 @@ type configFactory struct {
 	pdbLister policylisters.PodDisruptionBudgetLister
 	// a means to list all StorageClasses
 	storageClassLister storagelisters.StorageClassLister
+        // Recorder is the EventRecorder to use
+        recorder record.EventRecorder
 
 	// Close this to stop all reflectors
 	StopEverything chan struct{}
@@ -153,6 +156,7 @@ func NewConfigFactory(
 	serviceInformer coreinformers.ServiceInformer,
 	pdbInformer policyinformers.PodDisruptionBudgetInformer,
 	storageClassInformer storageinformers.StorageClassInformer,
+	eventRecorder record.EventRecorder,
 	hardPodAffinitySymmetricWeight int32,
 	enableEquivalenceClassCache bool,
 	disablePreemption bool,
@@ -178,6 +182,7 @@ func NewConfigFactory(
 		statefulSetLister:              statefulSetInformer.Lister(),
 		pdbLister:                      pdbInformer.Lister(),
 		storageClassLister:             storageClassLister,
+		recorder:			eventRecorder,
 		schedulerCache:                 schedulerCache,
 		StopEverything:                 stopEverything,
 		schedulerName:                  schedulerName,
@@ -639,6 +644,39 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	// before invalidating equivalencePodCache.
 	if err := c.schedulerCache.UpdatePod(oldPod, newPod); err != nil {
 		glog.Errorf("scheduler cache UpdatePod failed: %v", err)
+	}
+
+	// Call Update only if we modified the pod resources
+	if !reflect.DeepEqual(oldPod, newPod) {
+		resizeRequestAnnotation := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResources]
+		if resizeRequestAnnotation != "" {
+			newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResources] = ""
+			switch resizeRequestAnnotation {
+			case schedulerapi.ResizeActionUpdate:
+				// Case 1. Node has capacity. Update.
+				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
+				if err !=  nil {
+					glog.Errorf("Error updating pod %s for resizing: %+v", newPod.Name, err)
+					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodInPlaceResizeFailed", "Pod %s resizing update error: %v.", newPod.Name, err)
+				} else {
+					c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "PodInPlaceResizeSuccessful", "Updated pod %s to resize resources", updatedPod.Name)
+				}
+			case schedulerapi.ResizeActionReschedule:
+				// Case 2. Node does not have capacity. Delete oldPod, let controller re-create pod.
+				oldPodName := oldPod.Name
+				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", oldPodName)
+				err := c.client.CoreV1().Pods(oldPod.Namespace).Delete(oldPod.Name, nil)
+				if err !=  nil {
+					glog.Errorf("Error deleting pod %s for resizing: %+v", newPod.Name, err)
+					c.recorder.Eventf(oldPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod %s delete for resizing error: %v", oldPodName, err)
+				} else {
+					c.recorder.Eventf(nil, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", oldPodName)
+				}
+			case schedulerapi.ResizeActionNonePerPolicy:
+				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "Pod %s reschedule for resizing blocked by policy", oldPod.Name)
+			default:
+			}
+		}
 	}
 
 	c.invalidateCachedPredicatesOnUpdatePod(newPod, oldPod)
