@@ -288,6 +288,7 @@ func NewSchedulerConfig(s schedulerserverconfig.CompletedConfig) (*scheduler.Con
 		s.InformerFactory.Core().V1().Services(),
 		s.InformerFactory.Policy().V1beta1().PodDisruptionBudgets(),
 		storageClassInformer,
+		s.Recorder,
 		s.ComponentConfig.HardPodAffinitySymmetricWeight,
 		utilfeature.DefaultFeatureGate.Enabled(features.EnableEquivalenceClassCache),
 		s.ComponentConfig.DisablePreemption,

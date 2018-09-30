@@ -38,6 +38,34 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
+// Resources resizing policy and request annotations
+const (
+	AnnotationResizeResourcesPolicy = "scheduler.alpha.kubernetes.io/resize-resources-policy"
+	AnnotationResizeResources       = "scheduler.alpha.kubernetes.io/resize-resources"
+)
+
+// ResizePolicy controls how a pod is resized by the scheduler.
+// Only one of the following resize policies may be specified.
+// ResizePolicyInPlacePreferred: Scheduler will try restart-free resizing, failing which it restarts pod.
+// ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
+// ResizePolicyRestart: Scheduler will resize the pod by restarting it.
+// If none of the following policies is specified, the default one
+// is ResizePolicyInPlacePreferred.
+type ResizePolicy string
+
+const (
+        ResizePolicyInPlacePreferred ResizePolicy = "InPlacePreferred"
+        ResizePolicyInPlaceOnly      ResizePolicy = "InPlaceOnly"
+        ResizePolicyRestart          ResizePolicy = "Restart"
+)
+
+// Resizing action determined by scheduler
+const (
+	ResizeActionUpdate              = "UpdatePodForResizing"
+	ResizeActionReschedule          = "DeletePodForResizing"
+	ResizeActionNonePerPolicy       = "PodNotResizedPerPolicy"
+)
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Policy describes a struct of a policy resource in api.
