@@ -99,6 +99,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/util/sliceutils"
 	"k8s.io/kubernetes/pkg/kubelet/volumemanager"
 	"k8s.io/kubernetes/pkg/scheduler/algorithm/predicates"
+	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/security/apparmor"
 	sysctlwhitelist "k8s.io/kubernetes/pkg/security/podsecuritypolicy/sysctl"
 	utildbus "k8s.io/kubernetes/pkg/util/dbus"
@@ -2010,11 +2011,60 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	}
 }
 
+// True if the pod contains resources update request, and the new request fits in the node
+func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
+	var otherActivePods []*v1.Pod
+	if resizeActionAnnotation, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok &&
+		resizeActionAnnotation == string(schedulerapi.ResizeActionUpdate) {
+		// Pod needs resource update, check for fit
+		activePods := kl.GetActivePods()
+		for _, p := range activePods {
+			if p.UID != pod.UID {
+				otherActivePods = append(otherActivePods, p)
+			}
+		}
+
+		if ok, reason, message := kl.canAdmitPod(otherActivePods, pod); !ok {
+			podName := pod.Name
+			glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, reason, message)
+			resizeResourcesPolicy := schedulerapi.ResizePolicyInPlacePreferred
+			if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
+				resizeResourcesPolicy = schedulerapi.ResizePolicy(pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
+			}
+			if resizeResourcesPolicy != schedulerapi.ResizePolicyInPlaceOnly {
+				// Kill the pod to allow scheduling replacement with updated resources
+				deleteOptions := metav1.NewDeleteOptions(0)
+				deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(pod.UID))
+				if err := kl.kubeClient.CoreV1().Pods(pod.Namespace).Delete(pod.Name, deleteOptions); err != nil {
+					glog.Errorf("Delete pod %s for resource update failed. Error: %v", podName, err)
+					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToKillPod, "Error killing pod with resource update: %v", err)
+					syncErr := fmt.Errorf("error killing pod with resource update: %v", err)
+					utilruntime.HandleError(syncErr)
+				} else {
+					glog.V(4).Infof("Pod %s killed to reschedule with updated resources.", podName)
+					return false
+				}
+			}
+			// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeFailed, and update PodStatus
+			kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", reason)
+			//TODO: restore the previous pod resources values
+			return false
+		}
+		// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeSuccessful, and update PodStatus
+	}
+	return true
+}
+
 // HandlePodUpdates is the callback in the SyncHandler interface for pods
 // being updated from a config source.
 func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		// For non-delete pod updates, check that resource update, if any, is acceptable
+		if pod.ObjectMeta.DeletionTimestamp == nil && !kl.isPodResourceUpdateAcceptable(pod) {
+			continue
+		}
+
 		kl.podManager.UpdatePod(pod)
 		if kubepod.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)

@@ -65,6 +65,7 @@ import (
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util/queue"
 	kubeletvolume "k8s.io/kubernetes/pkg/kubelet/volumemanager"
+	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	schedulercache "k8s.io/kubernetes/pkg/scheduler/cache"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
@@ -1381,6 +1382,93 @@ func TestFilterOutTerminatedPods(t *testing.T) {
 	kubelet.podManager.SetPods(pods)
 	actual := kubelet.filterOutTerminatedPods(pods)
 	assert.Equal(t, expected, actual)
+}
+
+func TestIsPodResourceUpdateAcceptable(t *testing.T) {
+	testKubelet := newTestKubelet(t, true)
+	defer testKubelet.Cleanup()
+
+	kubelet := testKubelet.kubelet
+	nodes := []*v1.Node{
+		{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname},
+			Status: v1.NodeStatus{Capacity: v1.ResourceList{}, Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    *resource.NewQuantity(4, resource.DecimalSI),
+				v1.ResourceMemory: *resource.NewQuantity(4000, resource.BinarySI),
+				v1.ResourcePods:   *resource.NewQuantity(40, resource.DecimalSI),
+			}}},
+	}
+	kubelet.nodeInfo = testNodeInfo{nodes: nodes}
+
+	testPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       "12345678",
+				Name:      "bar",
+				Namespace: "new",
+			},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name: "foo",
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("1"),
+								v1.ResourceMemory: resource.MustParse("1000"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+	tests := []struct {
+		TestCaseDesc    string
+		ResizePolicy    schedulerapi.ResizePolicy
+		ResizeAction    schedulerapi.ResizeAction
+		ResourceCPU	string
+		ResourceMemory	string
+		ExpectedResult  bool
+	}{
+		{
+			"Update resources, InPlacePreferred - kubelet has enough capacity",
+			schedulerapi.ResizePolicyInPlacePreferred,
+			schedulerapi.ResizeActionUpdate,
+			"2",
+			"2000",
+			true,
+		},
+		{
+			"Update resources, InPlacePreferred - kubelet does not have enough memory",
+			schedulerapi.ResizePolicyInPlacePreferred,
+			schedulerapi.ResizeActionUpdate,
+			"2",
+			"5000",
+			false,
+		},
+		{
+			"Update resources, InPlacePreferred - kubelet does not have enough cpu",
+			schedulerapi.ResizePolicyInPlacePreferred,
+			schedulerapi.ResizeActionUpdate,
+			"5",
+			"2000",
+			false,
+		},
+		//TODO: Add comprehensive tests after community review
+	}
+
+	testPod.ObjectMeta.Annotations = make(map[string]string)
+	kubelet.podManager.AddPod(testPod)
+
+	for _, tt := range tests {
+		testPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy] = string(tt.ResizePolicy)
+		testPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction] = string(tt.ResizeAction)
+		testPod.Spec.Containers[0].Resources.Requests[v1.ResourceCPU] = resource.MustParse(tt.ResourceCPU)
+		testPod.Spec.Containers[0].Resources.Requests[v1.ResourceMemory] = resource.MustParse(tt.ResourceMemory)
+
+		ok := kubelet.isPodResourceUpdateAcceptable(testPod)
+		if tt.ExpectedResult != ok {
+			t.Fatalf("Testcase '%s' failed. Expected %v, actual %v", tt.TestCaseDesc, tt.ExpectedResult, ok)
+		}
+	}
 }
 
 func TestSyncPodsSetStatusToFailedForPodsThatRunTooLong(t *testing.T) {

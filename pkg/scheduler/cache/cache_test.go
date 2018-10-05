@@ -583,6 +583,7 @@ func TestUpdatePod(t *testing.T) {
 func TestUpdatePodResources(t *testing.T) {
 	// Enable volumesOnNodeForBalancing to do balanced resource allocation
 	utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%s=true", features.BalanceAttachedNodeVolumes))
+	utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%s=true", features.VerticalScaling))
 	nodeName := "node"
 	ttl := 10 * time.Second
 	testNode := &v1.Node{
@@ -602,8 +603,10 @@ func TestUpdatePodResources(t *testing.T) {
 	newPod := makeBasePod(t, nodeName, "test", "100m", "500", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}})
 	oldPod.Name = "test"
 	oldPod.Spec.Containers[0].Name = "test"
+	oldPod.Status.Phase = v1.PodRunning
 	newPod.Name = "test"
 	newPod.Spec.Containers[0].Name = "test"
+	newPod.Status.Phase = v1.PodRunning
 	newPod.ObjectMeta.Annotations = make(map[string]string)
 
 	tests := []struct {
@@ -653,7 +656,7 @@ func TestUpdatePodResources(t *testing.T) {
 
 	for _, tt := range tests {
 		newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy] = tt.ResizePolicy
-		newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = tt.ResizeResource
+		newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesRequest] = tt.ResizeResource
 
 		for k, _ := range oldPod.Spec.Containers[0].Resources.Requests {
 			oldPod.Spec.Containers[0].Resources.Requests[k] = newPod.Spec.Containers[0].Resources.Requests[k]
@@ -668,9 +671,9 @@ func TestUpdatePodResources(t *testing.T) {
 					tt.TestCaseDesc, tt.ExpectedPod.Spec.Containers, newPod.Spec.Containers,
 					diff.ObjectDiff(tt.ExpectedPod.Spec.Containers, newPod.Spec.Containers))
 		}
-		if newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] != tt.ExpectedAction {
+		if newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] != tt.ExpectedAction {
 			t.Fatalf("Testcase '%s' - resource update action mismatch. Expected: %s. Actual: %s\n",
-					tt.TestCaseDesc, tt.ExpectedAction, newPod.ObjectMeta.Annotations[api.AnnotationResizeResources])
+					tt.TestCaseDesc, tt.ExpectedAction, newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction])
 		}
 	}
 }

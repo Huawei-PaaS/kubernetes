@@ -648,9 +648,8 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 
 	// Call Update only if we modified the pod resources
 	if !reflect.DeepEqual(oldPod, newPod) {
-		if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResources]; ok {
-			delete(newPod.ObjectMeta.Annotations, schedulerapi.AnnotationResizeResources)
-			switch resizeRequestAnnotation {
+		if resizeActionAnnotation, ok := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+			switch schedulerapi.ResizeAction(resizeActionAnnotation) {
 			case schedulerapi.ResizeActionUpdate:
 				// Case 1. Node has capacity. Update.
 				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
@@ -661,18 +660,21 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 					c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "PodInPlaceResizeSuccessful", "Updated pod %s to resize resources", updatedPod.Name)
 				}
 			case schedulerapi.ResizeActionReschedule:
-				// Case 2. Node does not have capacity. Delete oldPod, let controller re-create pod.
-				oldPodName := oldPod.Name
-				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", oldPodName)
-				err := c.client.CoreV1().Pods(oldPod.Namespace).Delete(oldPod.Name, nil)
-				if err !=  nil {
+				// Case 2. Node does not have capacity. Delete pod, let controller re-create pod.
+				podName := newPod.Name
+				c.recorder.Eventf(newPod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", podName)
+				deleteOptions := metav1.NewDeleteOptions(0)
+				deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(newPod.UID))
+				if err := c.client.CoreV1().Pods(newPod.Namespace).Delete(newPod.Name, deleteOptions); err != nil {
 					glog.Errorf("Error deleting pod %s for resizing: %+v", newPod.Name, err)
-					c.recorder.Eventf(oldPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod %s delete for resizing error: %v", oldPodName, err)
+					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod %s delete for resizing error: %v", podName, err)
 				} else {
-					c.recorder.Eventf(nil, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", oldPodName)
+					c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", podName)
 				}
 			case schedulerapi.ResizeActionNonePerPolicy:
-				c.recorder.Eventf(oldPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "Pod %s reschedule for resizing blocked by policy", oldPod.Name)
+				// Case 3. Node does not have capacity. Pod reschedule blocked by policy.
+				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "Pod %s reschedule for resizing blocked by policy", newPod.Name)
+				// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeBlockedByPolicy, and update PodStatus
 			default:
 			}
 		}

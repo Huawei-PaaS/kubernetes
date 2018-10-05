@@ -38,10 +38,12 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
-// Resources resizing policy and request annotations
+// Annotations used for resources resizing policy, request, action, and restore
 const (
-	AnnotationResizeResourcesPolicy = "scheduler.alpha.kubernetes.io/resize-resources-policy"
-	AnnotationResizeResources       = "scheduler.alpha.kubernetes.io/resize-resources"
+	AnnotationResizeResourcesPolicy    = "scheduler.alpha.kubernetes.io/resize-resources-policy"
+	AnnotationResizeResourcesRequest   = "scheduler.alpha.kubernetes.io/resize-resources-request"
+	AnnotationResizeResourcesAction    = "scheduler.alpha.kubernetes.io/resize-resources-action"
+	AnnotationResizeResourcesPrevious  = "scheduler.alpha.kubernetes.io/resize-resources-previous"
 )
 
 // ResizePolicy controls how a pod is resized by the scheduler.
@@ -52,18 +54,26 @@ const (
 // If none of the following policies is specified, the default one
 // is ResizePolicyInPlacePreferred.
 type ResizePolicy string
-
 const (
         ResizePolicyInPlacePreferred ResizePolicy = "InPlacePreferred"
         ResizePolicyInPlaceOnly      ResizePolicy = "InPlaceOnly"
         ResizePolicyRestart          ResizePolicy = "Restart"
 )
 
-// Resizing action determined by scheduler
+// ResizeAction is the action determined by the scheduler for the resize request
+type ResizeAction string
 const (
-	ResizeActionUpdate              = "UpdatePodForResizing"
-	ResizeActionReschedule          = "DeletePodForResizing"
-	ResizeActionNonePerPolicy       = "PodNotResizedPerPolicy"
+	ResizeActionUpdate        ResizeAction = "UpdatePodForResizing"
+	ResizeActionReschedule    ResizeAction = "DeletePodForResizing"
+	ResizeActionNonePerPolicy ResizeAction = "PodNotResizedDueToPolicy"
+)
+
+// Status of resize request
+type ResizeStatus string
+const (
+	ResizeStatusBlockedByPolicy ResizeStatus = "PodNotResizedDueToPolicy"
+	ResizeStatusFailed          ResizeStatus = "PodResourceResizeFailed"
+	ResizeStatusSuccessful      ResizeStatus = "PodResourceResizeSuccessful"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

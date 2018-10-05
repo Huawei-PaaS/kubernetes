@@ -283,9 +283,10 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 		resizeResourcesPolicy = api.ResizePolicy(newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy])
 	}
 
-	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResources]; ok {
+	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesRequest]; ok {
+		delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesRequest)
 		if resizeResourcesPolicy == api.ResizePolicyRestart {
-			newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+			newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
 			glog.V(4).Infof("Rescheduling pod %s due to ResizePolicyRestart.", newPod.Name)
 			return nil
 		}
@@ -294,13 +295,19 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 			allocatable := node.AllocatableResource()
 			nodeMilliCPU := node.RequestedResource().MilliCPU
 			nodeMemory := node.RequestedResource().Memory
-
 			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
 				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
 				// InPlace resizing is possible
+				restoreContainersMap := make(map[string]v1.Container)
 				for i, container := range newPod.Spec.Containers {
 					resizeContainer, ok := resizeContainersMap[container.Name]
 					if ok {
+						// Backup current container resources for restore in case of update failure
+						restoreContainer := v1.Container{
+										Name:      container.Name,
+										Resources: container.Resources,
+									}
+						restoreContainersMap[container.Name] = restoreContainer
 						// Validation checks ensure pod QoS invariance, just update changed values
 						if resizeContainer.Resources.Requests != nil {
 							for k, v := range resizeContainer.Resources.Requests {
@@ -314,17 +321,23 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 						}
 					}
 				}
-				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionUpdate
+				if jsonStr, err := json.Marshal(restoreContainersMap); err != nil {
+					glog.Errorf("Pod %s resources restore map json marshal failed. Error: %v", newPod.Name, err)
+					return err
+				} else {
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious] = string(jsonStr)
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
+				}
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy
 				if resizeResourcesPolicy == api.ResizePolicyInPlaceOnly {
-					newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionNonePerPolicy
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionNonePerPolicy)
 					glog.V(4).Infof("In-place resizing of pod %s on node %s rejected by policy (%s). Allocatable CPU: %d, Memory: %d. Requested: CPU: %d, Memory %d.",
 						newPod.Name, newPod.Spec.NodeName, resizeResourcesPolicy, allocatable.MilliCPU, allocatable.Memory,
 						podResource.MilliCPU, podResource.Memory)
 					return nil
 				}
-				newPod.ObjectMeta.Annotations[api.AnnotationResizeResources] = api.ResizeActionReschedule
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
 			}
 		} else {
 			glog.Errorf("Pod %s getPodResizeRequirements failed. Error: %v", newPod.Name, err)

@@ -31,6 +31,7 @@ const (
 	// Pod event reason list
 	FailedToKillPod                = "FailedKillPod"
 	FailedToCreatePodContainer     = "FailedCreatePodContainer"
+	FailedToResizePodResources     = "FailedPodResourceResize"
 	FailedToMakePodDataDirectories = "Failed"
 	NetworkNotReady                = "NetworkNotReady"
 

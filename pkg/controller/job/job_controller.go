@@ -467,10 +467,10 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 		if len(resourceUpdates) > 0 {
 			anno := make(map[string]string)
 			jsonStr, _ := json.Marshal(resourceUpdates)
-			anno[schedulerapi.AnnotationResizeResources] = string(jsonStr)
+			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
 
 			// only patch new annotation. ignore duplicate
-			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResources] != anno[schedulerapi.AnnotationResizeResources] {
+			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest] != anno[schedulerapi.AnnotationResizeResourcesRequest] {
 				cm.PatchPodResourceAnnotation(pod, anno)
 				glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
 			} else {
