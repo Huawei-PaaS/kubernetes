@@ -38,7 +38,7 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
-// Annotations used for resources resizing policy, request, action, and restore
+// Annotations used for vertical resources scaling/resizing policy, request, action, and restore
 const (
 	AnnotationResizeResourcesPolicy    = "scheduler.alpha.kubernetes.io/resize-resources-policy"
 	AnnotationResizeResourcesRequest   = "scheduler.alpha.kubernetes.io/resize-resources-request"
@@ -46,34 +46,26 @@ const (
 	AnnotationResizeResourcesPrevious  = "scheduler.alpha.kubernetes.io/resize-resources-previous"
 )
 
-// ResizePolicy controls how a pod is resized by the scheduler.
+// PodResourcesResizePolicy controls how pod resources are vertically resized by the scheduler.
 // Only one of the following resize policies may be specified.
 // ResizePolicyInPlacePreferred: Scheduler will try restart-free resizing, failing which it restarts pod.
 // ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
 // ResizePolicyRestart: Scheduler will resize the pod by restarting it.
 // If none of the following policies is specified, the default one
 // is ResizePolicyInPlacePreferred.
-type ResizePolicy string
+type PodResourcesResizePolicy string
 const (
-        ResizePolicyInPlacePreferred ResizePolicy = "InPlacePreferred"
-        ResizePolicyInPlaceOnly      ResizePolicy = "InPlaceOnly"
-        ResizePolicyRestart          ResizePolicy = "Restart"
+        ResizePolicyInPlacePreferred PodResourcesResizePolicy = "InPlacePreferred"
+        ResizePolicyInPlaceOnly      PodResourcesResizePolicy = "InPlaceOnly"
+        ResizePolicyRestart          PodResourcesResizePolicy = "Restart"
 )
 
-// ResizeAction is the action determined by the scheduler for the resize request
-type ResizeAction string
+// PodResourcesResizeAction is the action determined by scheduler in response to pod vertical resize request.
+type PodResourcesResizeAction string
 const (
-	ResizeActionUpdate        ResizeAction = "UpdatePodForResizing"
-	ResizeActionReschedule    ResizeAction = "DeletePodForResizing"
-	ResizeActionNonePerPolicy ResizeAction = "PodNotResizedDueToPolicy"
-)
-
-// Status of resize request
-type ResizeStatus string
-const (
-	ResizeStatusBlockedByPolicy ResizeStatus = "PodNotResizedDueToPolicy"
-	ResizeStatusFailed          ResizeStatus = "PodResourceResizeFailed"
-	ResizeStatusSuccessful      ResizeStatus = "PodResourceResizeSuccessful"
+	ResizeActionUpdate        PodResourcesResizeAction = "UpdatePodForResizing"
+	ResizeActionReschedule    PodResourcesResizeAction = "DeletePodForResizing"
+	ResizeActionNonePerPolicy PodResourcesResizeAction = "PodNotResizedDueToPolicy"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

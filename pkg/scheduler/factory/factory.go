@@ -649,7 +649,7 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	// Call Update only if we modified the pod resources
 	if !reflect.DeepEqual(oldPod, newPod) {
 		if resizeActionAnnotation, ok := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
-			switch schedulerapi.ResizeAction(resizeActionAnnotation) {
+			switch schedulerapi.PodResourcesResizeAction(resizeActionAnnotation) {
 			case schedulerapi.ResizeActionUpdate:
 				// Case 1. Node has capacity. Update.
 				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)

@@ -2039,7 +2039,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 			glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, reason, message)
 			resizeResourcesPolicy := schedulerapi.ResizePolicyInPlacePreferred
 			if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
-				resizeResourcesPolicy = schedulerapi.ResizePolicy(pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
+				resizeResourcesPolicy = schedulerapi.PodResourcesResizePolicy(pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
 			}
 			if resizeResourcesPolicy != schedulerapi.ResizePolicyInPlaceOnly {
 				// Kill the pod to allow scheduling replacement with updated resources

@@ -1422,8 +1422,8 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 
 	tests := []struct {
 		TestCaseDesc    string
-		ResizePolicy    schedulerapi.ResizePolicy
-		ResizeAction    schedulerapi.ResizeAction
+		ResizePolicy    schedulerapi.PodResourcesResizePolicy
+		ResizeAction    schedulerapi.PodResourcesResizeAction
 		ResourceCPU	string
 		ResourceMemory	string
 		ExpectedResult  bool

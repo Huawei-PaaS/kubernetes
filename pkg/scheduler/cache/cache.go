@@ -280,7 +280,7 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 
 	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
 	if _, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy]; ok {
-		resizeResourcesPolicy = api.ResizePolicy(newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy])
+		resizeResourcesPolicy = api.PodResourcesResizePolicy(newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy])
 	}
 
 	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesRequest]; ok {
