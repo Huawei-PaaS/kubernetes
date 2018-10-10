@@ -27,6 +27,7 @@ var PodConditionsByKubelet = []v1.PodConditionType{
 	v1.PodInitialized,
 	v1.PodReasonUnschedulable,
 	v1.ContainersReady,
+	v1.PodResourcesResizeStatus,
 }
 
 // PodConditionByKubelet returns if the pod condition type is owned by kubelet

@@ -42,6 +42,7 @@ const (
 const (
 	AnnotationResizeResourcesPolicy    = "scheduler.alpha.kubernetes.io/resize-resources-policy"
 	AnnotationResizeResourcesRequest   = "scheduler.alpha.kubernetes.io/resize-resources-request"
+	AnnotationResizeResourcesActionVer = "scheduler.alpha.kubernetes.io/resize-resources-action-version"
 	AnnotationResizeResourcesAction    = "scheduler.alpha.kubernetes.io/resize-resources-action"
 	AnnotationResizeResourcesPrevious  = "scheduler.alpha.kubernetes.io/resize-resources-previous"
 )
@@ -66,6 +67,16 @@ const (
 	ResizeActionUpdate        PodResourcesResizeAction = "UpdatePodForResizing"
 	ResizeActionReschedule    PodResourcesResizeAction = "DeletePodForResizing"
 	ResizeActionNonePerPolicy PodResourcesResizeAction = "PodNotResizedDueToPolicy"
+	ResizeActionUpdateDone    PodResourcesResizeAction = "UpdatePodResizingDone"
+)
+
+const (
+	// Pod not rescheduled to resize resources due to InPlaceOnly policy
+	PodResourcesResizeStatusBlockedByPolicy = "PodNotResizedDueToPolicy"
+	// Pod resources resizing request failed
+	PodResourcesResizeStatusFailed          = "PodResourceResizeFailed"
+	// Pod resources resizing request was successful
+	PodResourcesResizeStatusSuccessful      = "PodResourceResizeSuccessful"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

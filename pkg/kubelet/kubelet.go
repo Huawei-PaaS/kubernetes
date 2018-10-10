@@ -2024,9 +2024,13 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 // True if the pod contains resources update request, and the new request fits in the node
 func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 	var otherActivePods []*v1.Pod
+	isAcceptable := true
+
 	if resizeActionAnnotation, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok &&
 		resizeActionAnnotation == string(schedulerapi.ResizeActionUpdate) {
 		// Pod needs resource update, check for fit
+		var resizeStatus v1.PodCondition
+		podName := pod.Name
 		activePods := kl.GetActivePods()
 		for _, p := range activePods {
 			if p.UID != pod.UID {
@@ -2035,34 +2039,62 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 		}
 
 		if ok, reason, message := kl.canAdmitPod(otherActivePods, pod); !ok {
-			podName := pod.Name
 			glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, reason, message)
 			resizeResourcesPolicy := schedulerapi.ResizePolicyInPlacePreferred
 			if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
 				resizeResourcesPolicy = schedulerapi.PodResourcesResizePolicy(pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
 			}
-			if resizeResourcesPolicy != schedulerapi.ResizePolicyInPlaceOnly {
+			if resizeResourcesPolicy == schedulerapi.ResizePolicyInPlaceOnly {
+				// Pod reschedule for resizing blocked by policy
+				kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", reason)
+				resizeStatus = v1.PodCondition{
+							Type:               v1.PodResourcesResizeStatus,
+							Status:             v1.ConditionFalse,
+							Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + reason,
+							Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+							LastTransitionTime: metav1.Now(),
+						}
+				isAcceptable = false
+			} else {
 				// Kill the pod to allow scheduling replacement with updated resources
+				kl.recorder.Eventf(pod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", podName)
 				deleteOptions := metav1.NewDeleteOptions(0)
 				deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(pod.UID))
-				if err := kl.kubeClient.CoreV1().Pods(pod.Namespace).Delete(pod.Name, deleteOptions); err != nil {
+				if err := kl.kubeClient.CoreV1().Pods(pod.Namespace).Delete(podName, deleteOptions); err != nil {
 					glog.Errorf("Delete pod %s for resource update failed. Error: %v", podName, err)
 					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToKillPod, "Error killing pod with resource update: %v", err)
 					syncErr := fmt.Errorf("error killing pod with resource update: %v", err)
 					utilruntime.HandleError(syncErr)
 				} else {
 					glog.V(4).Infof("Pod %s killed to reschedule with updated resources.", podName)
+					kl.recorder.Eventf(pod, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", podName)
 					return false
 				}
 			}
-			// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeFailed, and update PodStatus
-			kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", reason)
-			//TODO: restore the previous pod resources values
-			return false
+		} else {
+			// ResizeSuccessful
+			resizeStatus = v1.PodCondition{
+						Type:               v1.PodResourcesResizeStatus,
+						Status:             v1.ConditionTrue,
+						Reason:             schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request",
+						Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+						LastTransitionTime: metav1.Now(),
+					}
 		}
-		// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeSuccessful, and update PodStatus
+
+		idx := -1
+		for _, podCondition := range pod.Status.Conditions {
+			if podCondition.Type == v1.PodResourcesResizeStatus {
+				pod.Status.Conditions[idx] = resizeStatus
+				break
+			}
+		}
+		if idx < 0 {
+			pod.Status.Conditions = append(pod.Status.Conditions, resizeStatus)
+		}
+		kl.statusManager.SetPodStatus(pod, pod.Status)
 	}
-	return true
+	return isAcceptable
 }
 
 // HandlePodUpdates is the callback in the SyncHandler interface for pods

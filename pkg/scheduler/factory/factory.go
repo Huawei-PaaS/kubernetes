@@ -650,6 +650,9 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	if !reflect.DeepEqual(oldPod, newPod) {
 		if resizeActionAnnotation, ok := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
 			switch schedulerapi.PodResourcesResizeAction(resizeActionAnnotation) {
+			case schedulerapi.ResizeActionUpdateDone:
+				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRequestComplete", "Pod %s resize request handling complete", newPod.Name)
+				fallthrough
 			case schedulerapi.ResizeActionUpdate:
 				// Case 1. Node has capacity. Update.
 				updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
@@ -674,7 +677,7 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 			case schedulerapi.ResizeActionNonePerPolicy:
 				// Case 3. Node does not have capacity. Pod reschedule blocked by policy.
 				c.recorder.Eventf(newPod, v1.EventTypeNormal, "PodResizeRescheduleBlockedByPolicy", "Pod %s reschedule for resizing blocked by policy", newPod.Name)
-				// TODO: Add ResizeResourcesStatus field to PodStatus, set to ResizeBlockedByPolicy, and update PodStatus
+				// TODO: Update Pod Status
 			default:
 			}
 		}

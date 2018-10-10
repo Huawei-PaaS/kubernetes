@@ -283,6 +283,21 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 		resizeResourcesPolicy = api.PodResourcesResizePolicy(newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPolicy])
 	}
 
+	// If pod resources resize status has been set, clear out action and backup annotations.
+	for _, podCondition := range newPod.Status.Conditions {
+		if podCondition.Type == v1.PodResourcesResizeStatus {
+			actionVer, _ := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer]
+			if podCondition.Message == actionVer {
+				// TODO: If ResizeStatus shows failure, restore previous values
+				//previous, _ :=   pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPrevious]
+				delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesActionVer)
+				delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesPrevious)
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdateDone)
+			}
+			// TODO: Is there an else case to handle?
+		}
+	}
+
 	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesRequest]; ok {
 		delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesRequest)
 		if resizeResourcesPolicy == api.ResizePolicyRestart {
@@ -325,8 +340,9 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 					glog.Errorf("Pod %s resources restore map json marshal failed. Error: %v", newPod.Name, err)
 					return err
 				} else {
-					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious] = string(jsonStr)
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious] = string(jsonStr)
 				}
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy

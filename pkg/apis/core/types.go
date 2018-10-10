@@ -2096,6 +2096,8 @@ const (
 	PodReasonUnschedulable = "Unschedulable"
 	// ContainersReady indicates whether all containers in the pod are ready.
 	ContainersReady PodConditionType = "ContainersReady"
+	// PodResourcesResizeStatus represents the status of pod resources resizing request.
+	PodResourcesResizeStatus PodConditionType = "PodResourcesResizeStatus"
 )
 
 type PodCondition struct {
