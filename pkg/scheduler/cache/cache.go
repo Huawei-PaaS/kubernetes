@@ -290,8 +290,8 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 			if podCondition.Message == actionVer {
 				// TODO: If ResizeStatus shows failure, restore previous values
 				//previous, _ :=   pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPrevious]
-				delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesActionVer)
 				delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesPrevious)
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 				newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdateDone)
 			}
 			// TODO: Is there an else case to handle?
@@ -301,6 +301,7 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 	if resizeRequestAnnotation, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesRequest]; ok {
 		delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesRequest)
 		if resizeResourcesPolicy == api.ResizePolicyRestart {
+			newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 			newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
 			glog.V(4).Infof("Rescheduling pod %s due to ResizePolicyRestart.", newPod.Name)
 			return nil
@@ -320,7 +321,10 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 						// Backup current container resources for restore in case of update failure
 						restoreContainer := v1.Container{
 										Name:      container.Name,
-										Resources: container.Resources,
+										Resources: v1.ResourceRequirements{
+												Requests: container.Resources.Requests.DeepCopy(),
+												Limits:   container.Resources.Limits.DeepCopy(),
+											},
 									}
 						restoreContainersMap[container.Name] = restoreContainer
 						// Validation checks ensure pod QoS invariance, just update changed values
@@ -346,6 +350,7 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 				}
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy
+				newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 				if resizeResourcesPolicy == api.ResizePolicyInPlaceOnly {
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionNonePerPolicy)
 					glog.V(4).Infof("In-place resizing of pod %s on node %s rejected by policy (%s). Allocatable CPU: %d, Memory: %d. Requested: CPU: %d, Memory %d.",

@@ -96,6 +96,9 @@ type Manager interface {
 	// SetPodStatus caches updates the cached status for the given pod, and triggers a status update.
 	SetPodStatus(pod *v1.Pod, status v1.PodStatus)
 
+	// UpdatePodStatus caches updates cached status for a pod and triggers update, allows force update.
+	UpdatePodStatus(pod *v1.Pod, status v1.PodStatus, forceUpdate bool)
+
 	// SetContainerReadiness updates the cached container status with the given readiness, and
 	// triggers a status update.
 	SetContainerReadiness(podUID types.UID, containerID kubecontainer.ContainerID, ready bool)
@@ -188,6 +191,21 @@ func (m *manager) SetPodStatus(pod *v1.Pod, status v1.PodStatus) {
 	// because if the pod is in the non-running state, the pod worker still
 	// needs to be able to trigger an update and/or deletion.
 	m.updateStatusInternal(pod, status, pod.DeletionTimestamp != nil)
+}
+
+func (m *manager) UpdatePodStatus(pod *v1.Pod, status v1.PodStatus, forceUpdate bool) {
+	m.podStatusesLock.Lock()
+	defer m.podStatusesLock.Unlock()
+
+	for _, c := range pod.Status.Conditions {
+		if !kubetypes.PodConditionByKubelet(c.Type) {
+			glog.Errorf("Kubelet is trying to update pod condition %q for pod %q. "+
+				"But it is not owned by kubelet.", string(c.Type), format.Pod(pod))
+		}
+	}
+	// Make sure we're caching a deep copy.
+	status = *status.DeepCopy()
+	m.updateStatusInternal(pod, status, forceUpdate)
 }
 
 func (m *manager) SetContainerReadiness(podUID types.UID, containerID kubecontainer.ContainerID, ready bool) {
@@ -325,7 +343,6 @@ func (m *manager) updateStatusInternal(pod *v1.Pod, status v1.PodStatus, forceUp
 	} else {
 		oldStatus = pod.Status
 	}
-
 	// Check for illegal state transition in containers
 	if err := checkContainerStateTransition(oldStatus.ContainerStatuses, status.ContainerStatuses, pod.Spec.RestartPolicy); err != nil {
 		glog.Errorf("Status update on pod %v/%v aborted: %v", pod.Namespace, pod.Name, err)

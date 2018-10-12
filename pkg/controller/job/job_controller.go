@@ -463,6 +463,16 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 	}
 
 	for _, pod := range pods {
+		// Skip if a resource update is in flight
+		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
+			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			continue
+		}
+		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			continue
+		}
+
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
 			anno := make(map[string]string)
@@ -471,10 +481,19 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 			// only patch new annotation. ignore duplicate
 			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest] != anno[schedulerapi.AnnotationResizeResourcesRequest] {
-				cm.PatchPodResourceAnnotation(pod, anno)
+				skip := false
+			        for _, podCondition := range pod.Status.Conditions {
+			                if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
+						// TODO: rollback job controller spec
+						skip = true
+					}
+				}
+				if !skip { // BUG: TODO: This is HACKY. FIND A BETTER WAY!
+					cm.PatchPodResourceAnnotation(pod, anno)
+				}
 				glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
 			} else {
-				glog.V(6).Infof("Ignord attempt to patch duplicated annotation %v to pod %s", anno, pod.Name)
+				glog.V(6).Infof("Ignored attempt to patch duplicated annotation %v to pod %s", anno, pod.Name)
 			}
 		}
 	}
