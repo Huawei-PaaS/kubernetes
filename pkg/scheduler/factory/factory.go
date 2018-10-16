@@ -647,7 +647,7 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	}
 
 	// Call Update only if we modified the pod resources
-	if !reflect.DeepEqual(oldPod, newPod) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && !reflect.DeepEqual(oldPod, newPod) {
 		if resizeActionAnnotation, ok := newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok &&
 			newPod.ObjectMeta.ResourceVersion == newPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer] {
 			podName := newPod.Name
