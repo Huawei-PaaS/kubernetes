@@ -31,10 +31,12 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/admission"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
 	"k8s.io/kubernetes/pkg/apis/core/helper/qos"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubeapiserver/admission/util"
 	"k8s.io/kubernetes/pkg/quota"
 	"k8s.io/kubernetes/pkg/quota/generic"
@@ -147,7 +149,8 @@ func (p *podEvaluator) GroupResource() schema.GroupResource {
 // Handles returns true if the evaluator should handle the specified attributes.
 func (p *podEvaluator) Handles(a admission.Attributes) bool {
 	op := a.GetOperation()
-	if op == admission.Create || op == admission.Update {
+	if op == admission.Create ||
+		(utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && op == admission.Update) {
 		return true
 	}
 	initializationCompletion, err := util.IsInitializationCompletion(a)

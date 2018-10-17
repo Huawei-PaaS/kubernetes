@@ -330,6 +330,7 @@ func TestAdmitBelowQuotaLimitWithIncreasingResourceUpdate(t *testing.T) {
 }
 
 func TestAdmitExceedsQuotaLimitWithUpdate(t *testing.T) {
+	utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.VerticalScaling, true)
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	_, handler := SetupQuotaforCreateAndUpdate("1", "50Gi", stopCh)
