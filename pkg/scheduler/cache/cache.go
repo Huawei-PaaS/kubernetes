@@ -18,6 +18,7 @@ package cache
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -247,8 +248,9 @@ func getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[
 	var resizeContainers []v1.Container
 
 	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
-		glog.Errorf("Pod %s unmarshalling resource resize annotation '%s' failed. Error: %v", pod.Name, resizeRequestAnnotation, err)
-		return nil, nil, err
+		errMsg := fmt.Sprintf("Pod %s unmarshalling resource resize annotation '%s' failed. Error: %v", pod.Name, resizeRequestAnnotation, err)
+		glog.Error(errMsg)
+		return nil, nil, errors.New(errMsg)
 	}
 
 	resizeContainersMap := make(map[string]v1.Container)
@@ -276,22 +278,19 @@ func (cache *schedulerCache) restoreResources(oldPod, newPod *v1.Pod, restoreRes
 	cachedPod := currPodState.pod
 	restoreContainersMap := make(map[string]v1.Container)
 	if err := json.Unmarshal([]byte(restoreResources), &restoreContainersMap); err != nil {
-		glog.Errorf("Pod %s unmarshalling restore resource annotation '%s' failed. Error: %v", newPod.Name, restoreResources, err)
-		return err
+		errMsg := fmt.Sprintf("Pod %s unmarshalling restore resource annotation '%s' failed. Error: %v", newPod.Name, restoreResources, err)
+		glog.Error(errMsg)
+		return errors.New(errMsg)
 	}
 	for i, container := range newPod.Spec.Containers {
 		if restoreContainer, ok := restoreContainersMap[container.Name]; ok {
 			if restoreContainer.Resources.Requests != nil {
-				for k, v := range restoreContainer.Resources.Requests {
-					newPod.Spec.Containers[i].Resources.Requests[k] = v
-					cachedPod.Spec.Containers[i].Resources.Requests[k] = v
-				}
+				newPod.Spec.Containers[i].Resources.Requests = restoreContainer.Resources.Requests.DeepCopy()
+				cachedPod.Spec.Containers[i].Resources.Requests = restoreContainer.Resources.Requests.DeepCopy()
 			}
 			if restoreContainer.Resources.Limits != nil {
-				for k, v := range restoreContainer.Resources.Limits {
-					newPod.Spec.Containers[i].Resources.Limits[k] = v
-					cachedPod.Spec.Containers[i].Resources.Limits[k] = v
-				}
+				newPod.Spec.Containers[i].Resources.Limits = restoreContainer.Resources.Limits.DeepCopy()
+				cachedPod.Spec.Containers[i].Resources.Limits = restoreContainer.Resources.Limits.DeepCopy()
 			}
 		}
 	}
@@ -302,8 +301,8 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(oldPod, newPod *v1
 	node, ok := cache.nodes[newPod.Spec.NodeName]
 	if !ok {
 		errMsg := fmt.Sprintf("Node %s not found for pod %s", newPod.Spec.NodeName, newPod.Name)
-		glog.Errorf(errMsg)
-		return fmt.Errorf(errMsg)
+		glog.Error(errMsg)
+		return errors.New(errMsg)
 	}
 
 	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
@@ -378,8 +377,9 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(oldPod, newPod *v1
 					}
 				}
 				if restoreResourcesJson, err := json.Marshal(restoreContainersMap); err != nil {
-					glog.Errorf("Pod %s restore resources json marshal failed. Error: %v", newPod.Name, err)
-					return err
+					errMsg := fmt.Sprintf("Pod %s restore resources json marshal failed. Error: %v", newPod.Name, err)
+					glog.Error(errMsg)
+					return errors.New(errMsg)
 				} else {
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
