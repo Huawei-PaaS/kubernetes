@@ -33,8 +33,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/util/workqueue"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/quota"
 	"k8s.io/kubernetes/pkg/quota/generic"
 	_ "k8s.io/kubernetes/pkg/util/reflector/prometheus" // for reflector metric registration
@@ -537,6 +539,17 @@ func (e *quotaEvaluator) checkRequest(quotas []api.ResourceQuota, a admission.At
 		resourceQuota := outQuotas[index]
 
 		hardResources := quota.ResourceNames(resourceQuota.Status.Hard)
+		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
+			admission.Update == a.GetOperation() {
+
+			// pod count shouldn't be increased for resource update
+			for i, res := range hardResources {
+				if res == "pods" {
+					hardResources = append(hardResources[:i], hardResources[i+1:]...)
+					break
+				}
+			}
+		}
 		requestedUsage := quota.Mask(deltaUsage, hardResources)
 		newUsage := quota.Add(resourceQuota.Status.Used, requestedUsage)
 		maskedNewUsage := quota.Mask(newUsage, quota.ResourceNames(requestedUsage))
