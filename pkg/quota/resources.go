@@ -22,7 +22,9 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // Equals returns true if the two lists are equivalent
@@ -137,7 +139,12 @@ func SubtractWithNonNegativeResult(a api.ResourceList, b api.ResourceList) api.R
 		if other, found := b[key]; found {
 			quantity.Sub(other)
 		}
-		if quantity.Cmp(zero) > 0 {
+
+		if quantity.Cmp(zero) > 0 ||
+			(utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
+				(key == "cpu" || key == "memory" || // allow cpu and memory resource to decrease (negative update)
+					key == "requests.cpu" || key == "limits.cpu" ||
+					key == "requests.memory" || key == "limits.memory")) {
 			result[key] = quantity
 		} else {
 			result[key] = zero

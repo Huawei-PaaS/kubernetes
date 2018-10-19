@@ -24,9 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/quota"
 )
 
@@ -189,7 +191,9 @@ func (o *objectCountEvaluator) Constraints(required []api.ResourceName, item run
 // Handles returns true if the object count evaluator needs to track this attributes.
 func (o *objectCountEvaluator) Handles(a admission.Attributes) bool {
 	operation := a.GetOperation()
-	return operation == admission.Create || operation == admission.Update
+	return operation == admission.Create ||
+		(utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && operation == admission.Update) ||
+		(!utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && (o.allowCreateOnUpdate && operation == admission.Update))
 }
 
 // Matches returns true if the evaluator matches the specified quota with the provided input item
