@@ -243,7 +243,7 @@ func (cache *schedulerCache) addPod(pod *v1.Pod) {
 }
 
 // this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
-func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[string]v1.Container, *Resource, error) {
+func getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[string]v1.Container, *Resource, error) {
 	var resizeContainers []v1.Container
 
 	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
@@ -270,22 +270,27 @@ func (cache *schedulerCache) getPodResizeRequirements(pod *v1.Pod, resizeRequest
 	return resizeContainersMap, podResource, nil
 }
 
-func restoreResources(pod *v1.Pod, restoreResources string) error {
+func (cache *schedulerCache) restoreResources(oldPod, newPod *v1.Pod, restoreResources string) error {
+	podKey, _ := getPodKey(oldPod)
+	currPodState, _ := cache.podStates[podKey]
+	cachedPod := currPodState.pod
 	restoreContainersMap := make(map[string]v1.Container)
 	if err := json.Unmarshal([]byte(restoreResources), &restoreContainersMap); err != nil {
-		glog.Errorf("Pod %s unmarshalling restore resource annotation '%s' failed. Error: %v", pod.Name, restoreResources, err)
+		glog.Errorf("Pod %s unmarshalling restore resource annotation '%s' failed. Error: %v", newPod.Name, restoreResources, err)
 		return err
 	}
-	for i, container := range pod.Spec.Containers {
+	for i, container := range newPod.Spec.Containers {
 		if restoreContainer, ok := restoreContainersMap[container.Name]; ok {
 			if restoreContainer.Resources.Requests != nil {
 				for k, v := range restoreContainer.Resources.Requests {
-					pod.Spec.Containers[i].Resources.Requests[k] = v
+					newPod.Spec.Containers[i].Resources.Requests[k] = v
+					cachedPod.Spec.Containers[i].Resources.Requests[k] = v
 				}
 			}
 			if restoreContainer.Resources.Limits != nil {
 				for k, v := range restoreContainer.Resources.Limits {
-					pod.Spec.Containers[i].Resources.Limits[k] = v
+					newPod.Spec.Containers[i].Resources.Limits[k] = v
+					cachedPod.Spec.Containers[i].Resources.Limits[k] = v
 				}
 			}
 		}
@@ -293,7 +298,7 @@ func restoreResources(pod *v1.Pod, restoreResources string) error {
 	return nil
 }
 
-func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) error {
+func (cache *schedulerCache) processPodResourcesResizeRequest(oldPod, newPod *v1.Pod) error {
 	node, ok := cache.nodes[newPod.Spec.NodeName]
 	if !ok {
 		errMsg := fmt.Sprintf("Node %s not found for pod %s", newPod.Spec.NodeName, newPod.Name)
@@ -314,7 +319,7 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 				// If ResizeStatus shows failure, restore previous resource values
 				if podCondition.Status == v1.ConditionFalse {
 					if previousResources, ok := newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious]; ok {
-						restoreResources(newPod, previousResources)
+						cache.restoreResources(oldPod, newPod, previousResources)
 					}
 				}
 				delete(newPod.ObjectMeta.Annotations, api.AnnotationResizeResourcesPrevious)
@@ -334,13 +339,16 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 			return nil
 		}
 
-		if resizeContainersMap, podResource, err := cache.getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
+		if resizeContainersMap, podResource, err := getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
 			allocatable := node.AllocatableResource()
 			nodeMilliCPU := node.RequestedResource().MilliCPU
 			nodeMemory := node.RequestedResource().Memory
 			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
 				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
 				// InPlace resizing is possible
+				podKey, _ := getPodKey(oldPod)
+				currPodState, _ := cache.podStates[podKey]
+				cachedPod := currPodState.pod
 				restoreContainersMap := make(map[string]v1.Container)
 				for i, container := range newPod.Spec.Containers {
 					resizeContainer, ok := resizeContainersMap[container.Name]
@@ -358,22 +366,24 @@ func (cache *schedulerCache) processPodResourcesResizeRequest(newPod *v1.Pod) er
 						if resizeContainer.Resources.Requests != nil {
 							for k, v := range resizeContainer.Resources.Requests {
 								newPod.Spec.Containers[i].Resources.Requests[k] = v
+								cachedPod.Spec.Containers[i].Resources.Requests[k] = v
 							}
 						}
 						if resizeContainer.Resources.Limits != nil {
 							for k, v := range resizeContainer.Resources.Limits {
 								newPod.Spec.Containers[i].Resources.Limits[k] = v
+								cachedPod.Spec.Containers[i].Resources.Limits[k] = v
 							}
 						}
 					}
 				}
-				if jsonStr, err := json.Marshal(restoreContainersMap); err != nil {
-					glog.Errorf("Pod %s resources restore map json marshal failed. Error: %v", newPod.Name, err)
+				if restoreResourcesJson, err := json.Marshal(restoreContainersMap); err != nil {
+					glog.Errorf("Pod %s restore resources json marshal failed. Error: %v", newPod.Name, err)
 					return err
 				} else {
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ObjectMeta.ResourceVersion)
 					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
-					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious] = string(jsonStr)
+					newPod.ObjectMeta.Annotations[api.AnnotationResizeResourcesPrevious] = string(restoreResourcesJson)
 				}
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy
@@ -404,7 +414,7 @@ func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
 	// Resize request is valid for running pods
 	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
 		oldPod.Status.Phase == v1.PodRunning && newPod.Status.Phase == v1.PodRunning {
-		err = cache.processPodResourcesResizeRequest(newPod)
+		err = cache.processPodResourcesResizeRequest(oldPod, newPod)
 	}
 	cache.addPod(newPod)
 	return err

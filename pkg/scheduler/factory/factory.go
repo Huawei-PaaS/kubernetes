@@ -670,10 +670,8 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 			case schedulerapi.ResizeActionReschedule:
 				// Case 2. Node does not have capacity. Delete pod, let controller re-create pod.
 				c.recorder.Eventf(newPod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", podName)
-				deleteOptions := metav1.NewDeleteOptions(0)
-				deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(newPod.UID))
 				delete(newPod.ObjectMeta.Annotations, schedulerapi.AnnotationResizeResourcesActionVer)
-				if err := c.client.CoreV1().Pods(newPod.Namespace).Delete(newPod.Name, deleteOptions); err != nil {
+				if err := c.client.CoreV1().Pods(newPod.Namespace).Delete(newPod.Name, nil); err != nil {
 					glog.Errorf("Error deleting pod %s for resizing: %+v", newPod.Name, err)
 					c.recorder.Eventf(newPod, v1.EventTypeWarning, "PodRescheduleForResizeFailed", "Pod %s delete for resizing error: %v", podName, err)
 				} else {
