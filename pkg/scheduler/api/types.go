@@ -40,11 +40,12 @@ const (
 
 // Annotations used for vertical resources resizing policy, request, action, and restore
 const (
-	AnnotationResizeResourcesPolicy    = "scheduler.alpha.kubernetes.io/resize-resources-policy"
-	AnnotationResizeResourcesRequest   = "scheduler.alpha.kubernetes.io/resize-resources-request"
-	AnnotationResizeResourcesActionVer = "scheduler.alpha.kubernetes.io/resize-resources-action-version"
-	AnnotationResizeResourcesAction    = "scheduler.alpha.kubernetes.io/resize-resources-action"
-	AnnotationResizeResourcesPrevious  = "scheduler.alpha.kubernetes.io/resize-resources-previous"
+	AnnotationResizeResourcesPolicy     = "scheduler.alpha.kubernetes.io/resize-resources-policy"
+	AnnotationResizeResourcesRequestVer = "scheduler.alpha.kubernetes.io/resize-resources-request-version"
+	AnnotationResizeResourcesRequest    = "scheduler.alpha.kubernetes.io/resize-resources-request"
+	AnnotationResizeResourcesActionVer  = "scheduler.alpha.kubernetes.io/resize-resources-action-version"
+	AnnotationResizeResourcesAction     = "scheduler.alpha.kubernetes.io/resize-resources-action"
+	AnnotationResizeResourcesPrevious   = "scheduler.alpha.kubernetes.io/resize-resources-previous"
 )
 
 // PodResourcesResizePolicy controls how pod resources are vertically resized by the scheduler.

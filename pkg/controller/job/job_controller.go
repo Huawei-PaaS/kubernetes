@@ -24,7 +24,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -475,29 +474,40 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
+			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
+				// This is not a new request, check if earlier request failed.
+				// TODO: Implement better scheme - exponential backoff/pod-leaving event.. For now update based retry - yuck.
+				skip := true
+				for i, podCondition := range pod.Status.Conditions {
+					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
+						if time.Since(podCondition.LastProbeTime.Time).Seconds() > 30 {
+							glog.Warningf("Resource resize request for pod %s by job %s version %s failed. Retrying after backoff..", pod.Name, j.Name, j.ResourceVersion)
+							pod.Status.Conditions[i].LastProbeTime = metav1.Now()
+							skip = false
+						}
+						break
+					}
+				}
+				if skip {
+					glog.V(4).Infof("Resource resize was previously requested for pod %s by job %s version %s. Skipping request for now.", pod.Name, j.Name, j.ResourceVersion)
+					continue
+				}
+			}
+
 			anno := make(map[string]string)
 			jsonStr, _ := json.Marshal(resourceUpdates)
+			anno[schedulerapi.AnnotationResizeResourcesRequestVer] = j.ResourceVersion
 			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
 
 			// only patch new annotation. ignore duplicate
 			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest] != anno[schedulerapi.AnnotationResizeResourcesRequest] {
-				skip := false
-			        for _, podCondition := range pod.Status.Conditions {
-			                if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
-						// TODO: rollback job controller spec
-						skip = true
-					}
-				}
-				if !skip { // BUG: TODO: This is HACKY. FIND A BETTER WAY!
-					cm.PatchPodResourceAnnotation(pod, anno)
-				}
+				cm.PatchPodResourceAnnotation(pod, anno)
 				glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
 			} else {
 				glog.V(6).Infof("Ignored attempt to patch duplicated annotation %v to pod %s", anno, pod.Name)
 			}
 		}
 	}
-
 	return nil
 }
 

@@ -2039,6 +2039,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 					Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler",
 					Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
 					LastTransitionTime: metav1.Now(),
+					LastProbeTime:      metav1.Now(),
 				}
 			isAcceptable = false
 		}
@@ -2067,6 +2068,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 							Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + reason,
 							Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
 							LastTransitionTime: metav1.Now(),
+							LastProbeTime:      metav1.Now(),
 						}
 					isAcceptable = false
 				} else {
