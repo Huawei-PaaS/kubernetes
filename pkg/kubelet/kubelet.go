@@ -1581,6 +1581,9 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
 					return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
 				}
+				if err := kl.containerManager.UpdateQOSCgroups(); err != nil {
+					glog.V(2).Infof("Failed to update QoS cgroups while syncing pod: %v", err)
+				}
 			}
 		}
 	}
@@ -2034,13 +2037,13 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 		if resizeActionAnnotation == string(schedulerapi.ResizeActionNonePerPolicy) {
 			glog.V(4).Infof("Pod %s resize reschedule blocked by policy at scheduler. Updating status.", podName)
 			resizeStatus = v1.PodCondition{
-					Type:               v1.PodResourcesResizeStatus,
-					Status:             v1.ConditionFalse,
-					Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler",
-					Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-					LastTransitionTime: metav1.Now(),
-					LastProbeTime:      metav1.Now(),
-				}
+				Type:               v1.PodResourcesResizeStatus,
+				Status:             v1.ConditionFalse,
+				Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler",
+				Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+				LastTransitionTime: metav1.Now(),
+				LastProbeTime:      metav1.Now(),
+			}
 			isAcceptable = false
 		}
 
@@ -2063,13 +2066,13 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 					// Pod reschedule for resizing blocked by policy
 					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", reason)
 					resizeStatus = v1.PodCondition{
-							Type:               v1.PodResourcesResizeStatus,
-							Status:             v1.ConditionFalse,
-							Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + reason,
-							Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-							LastTransitionTime: metav1.Now(),
-							LastProbeTime:      metav1.Now(),
-						}
+						Type:               v1.PodResourcesResizeStatus,
+						Status:             v1.ConditionFalse,
+						Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + reason,
+						Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+						LastTransitionTime: metav1.Now(),
+						LastProbeTime:      metav1.Now(),
+					}
 					isAcceptable = false
 				} else {
 					// Kill the pod to allow scheduling replacement with updated resources
@@ -2090,12 +2093,12 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 			} else {
 				// ResizeSuccessful
 				resizeStatus = v1.PodCondition{
-						Type:               v1.PodResourcesResizeStatus,
-						Status:             v1.ConditionTrue,
-						Reason:             schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request",
-						Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-						LastTransitionTime: metav1.Now(),
-					}
+					Type:               v1.PodResourcesResizeStatus,
+					Status:             v1.ConditionTrue,
+					Reason:             schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request",
+					Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+					LastTransitionTime: metav1.Now(),
+				}
 			}
 		}
 
