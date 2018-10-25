@@ -2026,26 +2026,26 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 	var otherActivePods []*v1.Pod
 	isAcceptable := true
 
-	if resizeActionAnnotation, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
-		var resizeStatus v1.PodCondition
+	if resizeActionAnnotation, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+		var conditionStatus v1.ConditionStatus
+		var reason string
 		podName := pod.Name
 
-		// Scheduler determined that pod reschedule for resizing was blocked by policy, just update pod status and bugout
-		if resizeActionAnnotation == string(schedulerapi.ResizeActionNonePerPolicy) {
+		switch schedulerapi.PodResourcesResizeAction(resizeActionAnnotation) {
+		case schedulerapi.ResizeActionNonePerPolicy:
+			// Scheduler determined that pod reschedule for resizing was blocked by policy, just update pod status and bugout
 			glog.V(4).Infof("Pod %s resize reschedule blocked by policy at scheduler. Updating status.", podName)
-			resizeStatus = v1.PodCondition{
-					Type:               v1.PodResourcesResizeStatus,
-					Status:             v1.ConditionFalse,
-					Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler",
-					Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-					LastTransitionTime: metav1.Now(),
-					LastProbeTime:      metav1.Now(),
-				}
+			conditionStatus = v1.ConditionFalse
+			reason = schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler"
 			isAcceptable = false
-		}
-
-		// Pod needs resource update, check for fit
-		if resizeActionAnnotation == string(schedulerapi.ResizeActionUpdate) {
+		case schedulerapi.ResizeActionNonePerPDBViolation:
+			// Scheduler determined that pod reschedule for resizing was blocked due to PDB violation, just update pod status and bugout
+			glog.V(4).Infof("Pod %s resize reschedule blocked by scheduler due to pod disruption budget violation. Updating status.", podName)
+			conditionStatus = v1.ConditionFalse
+			reason = schedulerapi.PodResourcesResizeStatusBlockedByPDBViolation + ":scheduler"
+			isAcceptable = false
+		case schedulerapi.ResizeActionUpdate:
+			// Pod needs resource update, check for fit
 			activePods := kl.GetActivePods()
 			for _, p := range activePods {
 				if p.UID != pod.UID {
@@ -2053,23 +2053,17 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 				}
 			}
 
-			if ok, reason, message := kl.canAdmitPod(otherActivePods, pod); !ok {
-				glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, reason, message)
+			if ok, failReason, failMessage := kl.canAdmitPod(otherActivePods, pod); !ok {
+				glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, failReason, failMessage)
 				resizeResourcesPolicy := schedulerapi.ResizePolicyInPlacePreferred
-				if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
-					resizeResourcesPolicy = schedulerapi.PodResourcesResizePolicy(pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
+				if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
+					resizeResourcesPolicy = schedulerapi.PodResourcesResizePolicy(pod.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
 				}
 				if resizeResourcesPolicy == schedulerapi.ResizePolicyInPlaceOnly {
 					// Pod reschedule for resizing blocked by policy
-					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", reason)
-					resizeStatus = v1.PodCondition{
-							Type:               v1.PodResourcesResizeStatus,
-							Status:             v1.ConditionFalse,
-							Reason:             schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + reason,
-							Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-							LastTransitionTime: metav1.Now(),
-							LastProbeTime:      metav1.Now(),
-						}
+					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToResizePodResources, "Failed to update pod resources: %s", failReason)
+					conditionStatus = v1.ConditionFalse
+					reason = schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + failReason
 					isAcceptable = false
 				} else {
 					// Kill the pod to allow scheduling replacement with updated resources
@@ -2089,17 +2083,20 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 				}
 			} else {
 				// ResizeSuccessful
-				resizeStatus = v1.PodCondition{
-						Type:               v1.PodResourcesResizeStatus,
-						Status:             v1.ConditionTrue,
-						Reason:             schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request",
-						Message:            pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-						LastTransitionTime: metav1.Now(),
-					}
+				conditionStatus = v1.ConditionTrue
+				reason = schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request"
 			}
 		}
 
 		// Upate pod status
+		resizeStatus := v1.PodCondition{
+				Type:               v1.PodResourcesResizeStatus,
+				Status:             conditionStatus,
+				Reason:             reason,
+				Message:            pod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+				LastTransitionTime: metav1.Now(),
+				LastProbeTime:      metav1.Now(),
+			}
 		idx := -1
 		for i, podCondition := range pod.Status.Conditions {
 			if podCondition.Type == v1.PodResourcesResizeStatus {
@@ -2124,7 +2121,7 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 		// For non-delete pod updates, check that resource update, if any, is acceptable
 		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
 			// TODO: We may need to do this from HandlePodAdditions as well - investigate kubelet offline case.
-			if pod.ObjectMeta.DeletionTimestamp == nil && !kl.isPodResourceUpdateAcceptable(pod) {
+			if pod.DeletionTimestamp == nil && !kl.isPodResourceUpdateAcceptable(pod) {
 				continue
 			}
 		}

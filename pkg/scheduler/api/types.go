@@ -65,19 +65,22 @@ const (
 // PodResourcesResizeAction is the action determined by scheduler in response to pod vertical resize request.
 type PodResourcesResizeAction string
 const (
-	ResizeActionUpdate        PodResourcesResizeAction = "UpdatePodForResizing"
-	ResizeActionReschedule    PodResourcesResizeAction = "DeletePodForResizing"
-	ResizeActionNonePerPolicy PodResourcesResizeAction = "PodNotResizedDueToPolicy"
-	ResizeActionUpdateDone    PodResourcesResizeAction = "UpdatePodResizingDone"
+	ResizeActionUpdate              PodResourcesResizeAction = "UpdatePodForResizing"
+	ResizeActionReschedule          PodResourcesResizeAction = "DeletePodForResizing"
+	ResizeActionNonePerPolicy       PodResourcesResizeAction = "PodNotResizedDueToPolicy"
+	ResizeActionNonePerPDBViolation PodResourcesResizeAction = "PodNotResizedDueToPDBViolation"
+	ResizeActionUpdateDone          PodResourcesResizeAction = "UpdatePodResizingDone"
 )
 
 const (
 	// Pod not rescheduled to resize resources due to InPlaceOnly policy
-	PodResourcesResizeStatusBlockedByPolicy = "PodNotResizedDueToPolicy"
+	PodResourcesResizeStatusBlockedByPolicy       = "PodNotResizedDueToPolicy"
+	// Pod not rescheduled to resize resources due to PDB violation
+	PodResourcesResizeStatusBlockedByPDBViolation = "PodNotResizedDueToPDBViolation"
 	// Pod resources resizing request failed
-	PodResourcesResizeStatusFailed          = "PodResourceResizeFailed"
+	PodResourcesResizeStatusFailed                = "PodResourceResizeFailed"
 	// Pod resources resizing request was successful
-	PodResourcesResizeStatusSuccessful      = "PodResourceResizeSuccessful"
+	PodResourcesResizeStatusSuccessful            = "PodResourceResizeSuccessful"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
