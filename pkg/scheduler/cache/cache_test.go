@@ -579,6 +579,95 @@ func TestUpdatePod(t *testing.T) {
 	}
 }
 
+func TestCheckPodDisruptionBudgetOk(t *testing.T) {
+	nodeName := "node"
+	ttl := 10 * time.Second
+	testNode := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+			Status: v1.NodeStatus{
+					Allocatable: v1.ResourceList{
+					v1.ResourceCPU:            resource.MustParse("4"),
+					v1.ResourceMemory:	   resource.MustParse("4Gi"),
+					v1.ResourceName("foores"): resource.MustParse("1"),
+				},
+			},
+		}
+
+	testPod := makeBasePod(t, nodeName, "test", "2", "2Gi", "", []v1.ContainerPort{{HostIP: "127.0.0.1", HostPort: 80, Protocol: "TCP"}})
+	testPod.ObjectMeta.Labels = map[string]string{"foo":"bar", "foo2":"bar2"}
+
+	tests := []struct {
+		TestCaseDesc    string
+		TestPDB         *v1beta1.PodDisruptionBudget
+		ExpectedValue   bool
+	}{
+		{
+			"No pod disruption budget is specified",
+			nil,
+			true,
+		},
+		{
+			"Pod is within pod disruption budget",
+			&v1beta1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+							Name:      "foopdb",
+							UID:       "foouid",
+						},
+				Spec:       v1beta1.PodDisruptionBudgetSpec{
+							Selector:       &metav1.LabelSelector{MatchLabels: map[string]string{"foo":"bar"}},
+						},
+				Status:     v1beta1.PodDisruptionBudgetStatus{
+							PodDisruptionsAllowed: 1,
+						},
+			},
+			true,
+		},
+		{
+			"Pod is facing pod disruption budget violation",
+			&v1beta1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+							Name:      "foopdb",
+							UID:       "foouid",
+						},
+				Spec:       v1beta1.PodDisruptionBudgetSpec{
+							Selector:       &metav1.LabelSelector{MatchLabels: map[string]string{"foo":"bar"}},
+						},
+				Status:     v1beta1.PodDisruptionBudgetStatus{
+							PodDisruptionsAllowed: 0,
+						},
+			},
+			false,
+		},
+	}
+
+	cache := newSchedulerCache(ttl, time.Second, nil)
+	if err := cache.AddPod(testPod); err != nil {
+		t.Fatalf("AddPod failed: %v", err)
+	}
+	ni := cache.nodes[nodeName]
+	ni.SetNode(testNode)
+
+	for _, tt := range tests {
+		if tt.TestPDB != nil {
+			if pdbErr := cache.AddPDB(tt.TestPDB); pdbErr != nil {
+				t.Fatalf("AddPDB failed: %v", pdbErr)
+			}
+		}
+		if ok, err := cache.checkPodDisruptionBudgetOk(testPod); err != nil {
+			t.Fatalf("Testcase '%s' - checkPodDisruptionBudgetOk error: %v", tt.TestCaseDesc, err)
+		} else {
+			if ok != tt.ExpectedValue {
+				t.Fatalf("Testcase '%s' Expected: %v. Actual: %v", tt.TestCaseDesc, tt.ExpectedValue, ok)
+			}
+		}
+		if tt.TestPDB != nil {
+			cache.RemovePDB(tt.TestPDB)
+		}
+	}
+}
+
 // TestUpdatePodResources tests updatePod that requests resource update.
 func TestUpdatePodResources(t *testing.T) {
 	// Enable volumesOnNodeForBalancing to do balanced resource allocation
