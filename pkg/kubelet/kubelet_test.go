@@ -1399,6 +1399,7 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 	}
 	kubelet.nodeInfo = testNodeInfo{nodes: nodes}
 
+	actionVer := "345"
 	testPod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				UID:       "12345678",
@@ -1421,12 +1422,13 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 		}
 
 	tests := []struct {
-		TestCaseDesc    string
-		ResizePolicy    schedulerapi.PodResourcesResizePolicy
-		ResizeAction    schedulerapi.PodResourcesResizeAction
-		ResourceCPU	string
-		ResourceMemory	string
-		ExpectedResult  bool
+		TestCaseDesc            string
+		ResizePolicy            schedulerapi.PodResourcesResizePolicy
+		ResizeAction            schedulerapi.PodResourcesResizeAction
+		ResourceCPU             string
+		ResourceMemory          string
+		ExpectedResizeCondition *v1.PodCondition
+		ExpectedResult          bool
 	}{
 		{
 			"Update resources, InPlacePreferred - kubelet has enough capacity",
@@ -1434,6 +1436,12 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 			schedulerapi.ResizeActionUpdate,
 			"2",
 			"2000",
+			&v1.PodCondition{
+				Type:    v1.PodResourcesResizeStatus,
+				Status:  v1.ConditionTrue,
+				Reason:  "PodResourceResizeSuccessful:kubelet can accept pod resources resize request",
+				Message: actionVer,
+			},
 			true,
 		},
 		{
@@ -1442,6 +1450,7 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 			schedulerapi.ResizeActionUpdate,
 			"2",
 			"5000",
+			nil,
 			false,
 		},
 		{
@@ -1450,23 +1459,90 @@ func TestIsPodResourceUpdateAcceptable(t *testing.T) {
 			schedulerapi.ResizeActionUpdate,
 			"5",
 			"2000",
+			nil,
 			false,
 		},
-		//TODO: Add comprehensive tests after community review
+		{
+			"Update resources, InPlaceOnly - kubelet does not have enough memory",
+			schedulerapi.ResizePolicyInPlaceOnly,
+			schedulerapi.ResizeActionUpdate,
+			"2",
+			"5000",
+			&v1.PodCondition{
+				Type:    v1.PodResourcesResizeStatus,
+				Status:  v1.ConditionFalse,
+				Reason:  "PodNotResizedDueToPolicy:OutOfmemory",
+				Message: actionVer,
+			},
+			false,
+		},
+		{
+			"Update resources, InPlaceOnly - scheduler determined no resize due to policy",
+			schedulerapi.ResizePolicyInPlaceOnly,
+			schedulerapi.ResizeActionNonePerPolicy,
+			"5",
+			"2000",
+			&v1.PodCondition{
+				Type:    v1.PodResourcesResizeStatus,
+				Status:  v1.ConditionFalse,
+				Reason:  "PodNotResizedDueToPolicy:scheduler",
+				Message: actionVer,
+			},
+			false,
+		},
+		{
+			"Update resources, InPlacePreferred - scheduler determined no resize due to PDB violation",
+			schedulerapi.ResizePolicyInPlacePreferred,
+			schedulerapi.ResizeActionNonePerPDBViolation,
+			"2",
+			"2000",
+			&v1.PodCondition{
+				Type:    v1.PodResourcesResizeStatus,
+				Status:  v1.ConditionFalse,
+				Reason:  "PodNotResizedDueToPDBViolation:scheduler",
+				Message: actionVer,
+			},
+			false,
+		},
 	}
 
-	testPod.ObjectMeta.Annotations = make(map[string]string)
+	testPod.Annotations = make(map[string]string)
+	testPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer] = actionVer
 	kubelet.podManager.AddPod(testPod)
 
 	for _, tt := range tests {
-		testPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesPolicy] = string(tt.ResizePolicy)
-		testPod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction] = string(tt.ResizeAction)
+		testPod.Annotations[schedulerapi.AnnotationResizeResourcesPolicy] = string(tt.ResizePolicy)
+		testPod.Annotations[schedulerapi.AnnotationResizeResourcesAction] = string(tt.ResizeAction)
 		testPod.Spec.Containers[0].Resources.Requests[v1.ResourceCPU] = resource.MustParse(tt.ResourceCPU)
 		testPod.Spec.Containers[0].Resources.Requests[v1.ResourceMemory] = resource.MustParse(tt.ResourceMemory)
+		testPod.Status.Conditions = nil
 
 		ok := kubelet.isPodResourceUpdateAcceptable(testPod)
 		if tt.ExpectedResult != ok {
 			t.Fatalf("Testcase '%s' failed. Expected %v, actual %v", tt.TestCaseDesc, tt.ExpectedResult, ok)
+		}
+		if testPod.Status.Conditions == nil {
+			if tt.ExpectedResizeCondition != nil {
+				t.Fatalf("Testcase '%s' failed. Pod condition is nil. Expected %v",
+					tt.TestCaseDesc, tt.ExpectedResizeCondition)
+			}
+			continue
+		}
+		if testPod.Status.Conditions[0].Type != tt.ExpectedResizeCondition.Type {
+			t.Fatalf("Testcase '%s' failed. Pod condition type mismatch. Expected %v, actual %v",
+					tt.TestCaseDesc, tt.ExpectedResizeCondition.Type, testPod.Status.Conditions[0].Type)
+		}
+		if testPod.Status.Conditions[0].Status != tt.ExpectedResizeCondition.Status {
+			t.Fatalf("Testcase '%s' failed. Pod condition status mismatch. Expected %v, actual %v",
+					tt.TestCaseDesc, tt.ExpectedResizeCondition.Status, testPod.Status.Conditions[0].Status)
+		}
+		if testPod.Status.Conditions[0].Reason != tt.ExpectedResizeCondition.Reason {
+			t.Fatalf("Testcase '%s' failed. Pod condition reason mismatch. Expected %s, actual %s",
+					tt.TestCaseDesc, tt.ExpectedResizeCondition.Reason, testPod.Status.Conditions[0].Reason)
+		}
+		if testPod.Status.Conditions[0].Message != tt.ExpectedResizeCondition.Message {
+			t.Fatalf("Testcase '%s' failed. Pod condition action version mismatch. Expected %s, actual %s",
+					tt.TestCaseDesc, tt.ExpectedResizeCondition.Message, testPod.Status.Conditions[0].Message)
 		}
 	}
 }
