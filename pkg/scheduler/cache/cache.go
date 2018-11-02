@@ -273,7 +273,7 @@ func getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[
 	return resizeContainersMap, podResource, nil
 }
 
-func (cache *schedulerCache) restoreResources(oldPod, newPod *v1.Pod, restoreResources string) error {
+func (cache *schedulerCache) restorePodResources(oldPod, newPod *v1.Pod, restoreResources string) error {
 	podKey, _ := getPodKey(oldPod)
 	currPodState, _ := cache.podStates[podKey]
 	cachedPod := currPodState.pod
@@ -354,7 +354,7 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 			// If ResizeStatus shows failure, restore previous resource values
 			if podCondition.Status == v1.ConditionFalse {
 				if previousResources, ok := newPod.Annotations[api.AnnotationResizeResourcesPrevious]; ok {
-					cache.restoreResources(oldPod, newPod, previousResources)
+					cache.restorePodResources(oldPod, newPod, previousResources)
 				}
 			}
 			delete(newPod.Annotations, api.AnnotationResizeResourcesPrevious)
