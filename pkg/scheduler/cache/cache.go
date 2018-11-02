@@ -309,12 +309,12 @@ func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, re
 		if ok {
 			// Backup current container resources for restore in case of update failure
 			restoreContainer := v1.Container{
-							Name:      container.Name,
-							Resources: v1.ResourceRequirements{
-									Requests: container.Resources.Requests.DeepCopy(),
-									Limits:   container.Resources.Limits.DeepCopy(),
-								},
-							}
+				Name: container.Name,
+				Resources: v1.ResourceRequirements{
+					Requests: container.Resources.Requests.DeepCopy(),
+					Limits:   container.Resources.Limits.DeepCopy(),
+				},
+			}
 			restoreContainersMap[container.Name] = restoreContainer
 			// Validation checks ensure pod QoS invariance, just update changed values
 			if resizeContainer.Resources.Requests != nil {
@@ -331,6 +331,7 @@ func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, re
 			}
 		}
 	}
+
 	if restoreResourcesJson, err := json.Marshal(restoreContainersMap); err != nil {
 		errMsg := fmt.Sprintf("Pod %s restore resources json marshal failed. Error: %v", newPod.Name, err)
 		glog.Error(errMsg)
@@ -354,6 +355,7 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 			// If ResizeStatus shows failure, restore previous resource values
 			if podCondition.Status == v1.ConditionFalse {
 				if previousResources, ok := newPod.Annotations[api.AnnotationResizeResourcesPrevious]; ok {
+					glog.V(4).Infof("Restoring resource values for pod %v due to a failed earlier resizing attempt", oldPod.Name)
 					cache.restorePodResources(oldPod, newPod, previousResources)
 				}
 			}
@@ -398,6 +400,7 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 		return errors.New(errMsg)
 	}
 
+	// resoure resize policy is defaulted to InPlacePreferred
 	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
 	if _, ok := newPod.Annotations[api.AnnotationResizeResourcesPolicy]; ok {
 		resizeResourcesPolicy = api.PodResourcesResizePolicy(newPod.Annotations[api.AnnotationResizeResourcesPolicy])
@@ -407,6 +410,7 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 
 	if resizeRequestAnnotation, ok := newPod.Annotations[api.AnnotationResizeResourcesRequest]; ok {
 		delete(newPod.Annotations, api.AnnotationResizeResourcesRequest)
+
 		if resizeResourcesPolicy == api.ResizePolicyRestart {
 			newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
 			newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)

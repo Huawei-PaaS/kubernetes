@@ -19,16 +19,12 @@ package job
 import (
 	"encoding/json"
 	"fmt"
-	"math"
-	"reflect"
-	"sort"
-	"sync"
-	"time"
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -47,6 +43,11 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/util/metrics"
+	"math"
+	"reflect"
+	"sort"
+	"sync"
+	"time"
 
 	"github.com/golang/glog"
 )
@@ -90,6 +91,9 @@ type JobController struct {
 	queue workqueue.RateLimitingInterface
 
 	recorder record.EventRecorder
+
+	// A list of jobs to be re-sync'd for resource update
+	jobsToReSyncResource map[types.UID]*batch.Job
 }
 
 func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchinformers.JobInformer, kubeClient clientset.Interface) *JobController {
@@ -134,6 +138,8 @@ func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchin
 
 	jm.updateHandler = jm.updateJobStatus
 	jm.syncHandler = jm.syncJob
+
+	jm.jobsToReSyncResource = make(map[types.UID]*batch.Job)
 
 	return jm
 }
@@ -230,6 +236,31 @@ func (jm *JobController) addPod(obj interface{}) {
 	}
 }
 
+func (jm *JobController) enqueueResourceUpdateForRetry() {
+	for key, jobToRetry := range jm.jobsToReSyncResource {
+		//make sure job still alive
+		storedJob, err := jm.jobLister.Jobs(jobToRetry.Namespace).Get(jobToRetry.Name)
+		if err != nil || storedJob.UID != jobToRetry.UID {
+			delete(jm.jobsToReSyncResource, key)
+			glog.V(4).Infof("Skipping retry resource update for a non-existing job %s", jobToRetry.Name)
+			continue
+		}
+		jm.enqueueController(jobToRetry, true)
+		glog.V(4).Infof("Added job %s to retry resoruce update", jobToRetry.Name)
+	}
+}
+
+func hasFailedResourceResizeStatus(pod *v1.Pod) bool {
+	for _, podCondition := range pod.Status.Conditions {
+		if podCondition.Type == v1.PodResourcesResizeStatus &&
+			podCondition.Status == v1.ConditionFalse {
+			return true
+		}
+	}
+
+	return false
+}
+
 // When a pod is updated, figure out what job/s manage it and wake them up.
 // If the labels of the pod have changed we need to awaken both the old
 // and new job. old and cur must be *v1.Pod types.
@@ -260,6 +291,15 @@ func (jm *JobController) updatePod(old, cur interface{}) {
 		// The ControllerRef was changed. Sync the old controller, if any.
 		if job := jm.resolveControllerRef(oldPod.Namespace, oldControllerRef); job != nil {
 			jm.enqueueController(job, immediate)
+		}
+	}
+
+	// retry (enqueue) jobs failed from resource update
+	if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && !hasFailedResourceResizeStatus(curPod) {
+		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
+			if key, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok && key == string(schedulerapi.ResizeActionUpdateDone) {
+				jm.enqueueResourceUpdateForRetry()
+			}
 		}
 	}
 
@@ -318,6 +358,10 @@ func (jm *JobController) deletePod(obj interface{}) {
 	if err != nil {
 		return
 	}
+
+	// retry (enqueue) jobs failed from resource update
+	jm.enqueueResourceUpdateForRetry()
+
 	jm.expectations.DeletionObserved(jobKey)
 	jm.enqueueController(job, true)
 }
@@ -475,22 +519,22 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
 			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
+
 				// This is not a new request, check if earlier request failed.
-				// TODO: Implement better scheme - exponential backoff/pod-leaving event.. For now update based retry - yuck.
-				skip := true
-				for i, podCondition := range pod.Status.Conditions {
+				for _, podCondition := range pod.Status.Conditions {
 					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
-						if time.Since(podCondition.LastProbeTime.Time).Seconds() > 30 {
-							glog.Warningf("Resource resize request for pod %s by job %s version %s failed. Retrying after backoff..", pod.Name, j.Name, j.ResourceVersion)
-							pod.Status.Conditions[i].LastProbeTime = metav1.Now()
-							skip = false
+						// queue this job for resource update retry (when there's pod update and/or deletion)
+						if _, ok := jm.jobsToReSyncResource[j.UID]; !ok {
+
+							jm.jobsToReSyncResource[j.UID] = j
+							glog.V(4).Infof("Added job %s to retry resoruce queue", j.Name)
+
+							return nil
 						}
-						break
+
+						delete(jm.jobsToReSyncResource, j.UID)
+						glog.V(4).Infof("Retrying Resource resizing for pod %s by job %s version %s.", pod.Name, j.Name, j.ResourceVersion)
 					}
-				}
-				if skip {
-					glog.V(4).Infof("Resource resize was previously requested for pod %s by job %s version %s. Skipping request for now.", pod.Name, j.Name, j.ResourceVersion)
-					continue
 				}
 			}
 
@@ -550,6 +594,8 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 		glog.V(4).Infof("Finished syncing job %q (%v)", key, time.Since(startTime))
 	}()
 
+	glog.V(4).Infof("Started syncing job %q (%v)", key, startTime)
+
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return false, err
@@ -562,6 +608,10 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 		if errors.IsNotFound(err) {
 			glog.V(4).Infof("Job has been deleted: %v", key)
 			jm.expectations.DeleteExpectations(key)
+
+			// retry failed resource update
+			jm.enqueueResourceUpdateForRetry()
+
 			return true, nil
 		}
 		return false, err

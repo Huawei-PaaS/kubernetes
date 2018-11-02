@@ -106,8 +106,8 @@ type configFactory struct {
 	pdbLister policylisters.PodDisruptionBudgetLister
 	// a means to list all StorageClasses
 	storageClassLister storagelisters.StorageClassLister
-        // Recorder is the EventRecorder to use
-        recorder record.EventRecorder
+	// Recorder is the EventRecorder to use
+	recorder record.EventRecorder
 
 	// Close this to stop all reflectors
 	StopEverything chan struct{}
@@ -182,7 +182,7 @@ func NewConfigFactory(
 		statefulSetLister:              statefulSetInformer.Lister(),
 		pdbLister:                      pdbInformer.Lister(),
 		storageClassLister:             storageClassLister,
-		recorder:			eventRecorder,
+		recorder:                       eventRecorder,
 		schedulerCache:                 schedulerCache,
 		StopEverything:                 stopEverything,
 		schedulerName:                  schedulerName,

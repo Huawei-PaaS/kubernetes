@@ -2091,15 +2091,15 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 			}
 		}
 
-		// Upate pod status
+		// Update pod status
 		resizeStatus := v1.PodCondition{
-				Type:               v1.PodResourcesResizeStatus,
-				Status:             conditionStatus,
-				Reason:             reason,
-				Message:            pod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
-				LastTransitionTime: metav1.Now(),
-				LastProbeTime:      metav1.Now(),
-			}
+			Type:               v1.PodResourcesResizeStatus,
+			Status:             conditionStatus,
+			Reason:             reason,
+			Message:            pod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer],
+			LastTransitionTime: metav1.Now(),
+			LastProbeTime:      metav1.Now(),
+		}
 		idx := -1
 		for i, podCondition := range pod.Status.Conditions {
 			if podCondition.Type == v1.PodResourcesResizeStatus {
