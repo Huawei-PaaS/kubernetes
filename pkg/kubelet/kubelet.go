@@ -2032,18 +2032,17 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 	if resizeActionAnnotation, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
 		var conditionStatus v1.ConditionStatus
 		var reason string
-		podName := pod.Name
 
 		switch schedulerapi.PodResourcesResizeAction(resizeActionAnnotation) {
 		case schedulerapi.ResizeActionNonePerPolicy:
 			// Scheduler determined that pod reschedule for resizing was blocked by policy, just update pod status and bugout
-			glog.V(4).Infof("Pod %s resize reschedule blocked by policy at scheduler. Updating status.", podName)
+			glog.V(4).Infof("Pod '%s' reschedule to resize resources blocked by policy at scheduler. Updating status.", pod.Name)
 			conditionStatus = v1.ConditionFalse
 			reason = schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler"
 			isAcceptable = false
 		case schedulerapi.ResizeActionNonePerPDBViolation:
 			// Scheduler determined that pod reschedule for resizing was blocked due to PDB violation, just update pod status and bugout
-			glog.V(4).Infof("Pod %s resize reschedule blocked by scheduler due to pod disruption budget violation. Updating status.", podName)
+			glog.V(4).Infof("Pod '%s' reschedule to resize resources blocked by scheduler due to disruption budget violation. Updating status.", pod.Name)
 			conditionStatus = v1.ConditionFalse
 			reason = schedulerapi.PodResourcesResizeStatusBlockedByPDBViolation + ":scheduler"
 			isAcceptable = false
@@ -2057,7 +2056,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 			}
 
 			if ok, failReason, failMessage := kl.canAdmitPod(otherActivePods, pod); !ok {
-				glog.Warningf("Pod %s resource update admit failed. Reason: '%s' Error: '%s'", podName, failReason, failMessage)
+				glog.Warningf("Pod '%s' resource update admit failed. Reason: '%s' Error: '%s'", pod.Name, failReason, failMessage)
 				resizeResourcesPolicy := schedulerapi.ResizePolicyInPlacePreferred
 				if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesPolicy]; ok {
 					resizeResourcesPolicy = schedulerapi.PodResourcesResizePolicy(pod.Annotations[schedulerapi.AnnotationResizeResourcesPolicy])
@@ -2070,17 +2069,17 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 					isAcceptable = false
 				} else {
 					// Kill the pod to allow scheduling replacement with updated resources
-					kl.recorder.Eventf(pod, v1.EventTypeNormal, "DeletePodForResizeReschedule", "Deleting pod %s to reschedule for resizing", podName)
+					podName := pod.Name
+					kl.recorder.Eventf(pod, v1.EventTypeNormal, "ResizeActionReschedule", "Deleting pod to reschedule with resized resources")
 					deleteOptions := metav1.NewDeleteOptions(0)
 					deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(pod.UID))
 					if err := kl.kubeClient.CoreV1().Pods(pod.Namespace).Delete(podName, deleteOptions); err != nil {
-						glog.Errorf("Delete pod %s for resource update failed. Error: %v", podName, err)
-						kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToKillPod, "Error killing pod with resource update: %v", err)
-						syncErr := fmt.Errorf("error killing pod with resource update: %v", err)
+						glog.Errorf("Error deleting pod '%s' for resizing resources: %v", podName, err)
+						kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToKillPod, "Pod resize delete error: %v", err)
+						syncErr := fmt.Errorf("Error killing pod for resources resizing: %v", err)
 						utilruntime.HandleError(syncErr)
 					} else {
-						kl.recorder.Eventf(pod, v1.EventTypeNormal, "PodRescheduleForResizeSuccessful", "Pod %s deleted for resizing resources", podName)
-						glog.V(4).Infof("Pod %s killed to reschedule with updated resources.", podName)
+						glog.V(4).Infof("Pod '%s' deleted to reschedule with resized resources.", podName)
 					}
 					return false
 				}
