@@ -296,9 +296,14 @@ func (jm *JobController) updatePod(old, cur interface{}) {
 
 	// retry (enqueue) jobs failed from resource update
 	if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && !hasFailedResourceResizeStatus(curPod) {
+
+		// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
 		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
-			if key, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok && key == string(schedulerapi.ResizeActionUpdateDone) {
-				jm.enqueueResourceUpdateForRetry()
+			// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
+			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
+				if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
+					jm.enqueueResourceUpdateForRetry()
+				}
 			}
 		}
 	}
