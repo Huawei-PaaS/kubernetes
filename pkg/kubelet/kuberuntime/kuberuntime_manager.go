@@ -526,6 +526,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		reason := ""
 		restart := shouldRestartOnFailure(pod)
 		if expectedHash, actualHash, changed := containerChanged(&container, containerStatus); changed {
+glog.Warningf("VDBG: POD_NAME: %s. CTR_NAME: %s. EH: '%x' AH: '%x'. CHANGED: %v. HASH_ZERO: '%x' STS_HASH_ZERO: '%x'\nCTRRES: %+v\n", pod.Name, container.Name, expectedHash, actualHash, changed, kubecontainer.HashContainerZeroResources(&container), containerStatus.HashZeroResources, container.Resources)
 			if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
 				kubecontainer.HashContainerZeroResources(&container) == containerStatus.HashZeroResources {
 				// Only the ResourceRequirement has changed. Update container, don't restart it.

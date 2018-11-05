@@ -935,6 +935,7 @@ func TestProcessPodResizeStatus(t *testing.T) {
 		newPod.Annotations[api.AnnotationResizeResourcesActionVer] = actionVer
 		newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
 		newPod.Status.Conditions = tt.ResizeStatusConditions
+fmt.Printf("POD_STATUS_CONDITIONS: %#v\n", newPod.Status.Conditions)
 
 		cache.processPodResizeStatus(oldPod, newPod)
 		if !reflect.DeepEqual(newPod.Spec.Containers, tt.ExpectedContainers) {

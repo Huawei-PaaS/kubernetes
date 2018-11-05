@@ -24,6 +24,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+"runtime/debug"
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -456,30 +457,35 @@ func mergeResourceChanges(pod *v1.Pod, cMap map[string]*v1.Container) []v1.Conta
 func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 	cm := controller.NewPodControllerRefManager(jm.podControl, j, nil, controllerKind, nil)
 
+glog.Warningf("\n.......................\nVDBG: JOB: %s (%s). LEN_PODS: %d\n", j.Name, j.ResourceVersion, len(pods))
+debug.PrintStack()
+glog.Warningf("\n.......................\n\n")
 	cMap := make(map[string]*v1.Container)
 	for i, container := range j.Spec.Template.Spec.Containers {
 		cMap[container.Name] = &(j.Spec.Template.Spec.Containers[i])
 	}
 
 	for _, pod := range pods {
+glog.Warningf("\n++++++++\nVDBG: JOB: %s (%s) . Pod %s (%s)\n", j.Name, j.ResourceVersion, pod.Name, pod.ResourceVersion)
 		// Skip if a resource update is in flight
-		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
-		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
-			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
+			if requestVer, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
 				// This is not a new request, check if earlier request failed.
 				// TODO: Implement better scheme - exponential backoff/pod-leaving event.. For now update based retry - yuck.
 				skip := true
 				for i, podCondition := range pod.Status.Conditions {
 					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
+glog.Warningf("VDBG: PC: %#v\nRESIZE_FAIL_TIME: %v. NOW_TIME: %v. DURATION: %v\n", podCondition, podCondition.LastProbeTime, metav1.Now(), time.Since(podCondition.LastProbeTime.Time))
 						if time.Since(podCondition.LastProbeTime.Time).Seconds() > 30 {
 							glog.Warningf("Resource resize request for pod %s by job %s version %s failed. Retrying after backoff..", pod.Name, j.Name, j.ResourceVersion)
 							pod.Status.Conditions[i].LastProbeTime = metav1.Now()
@@ -490,6 +496,7 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 				}
 				if skip {
 					glog.V(4).Infof("Resource resize was previously requested for pod %s by job %s version %s. Skipping request for now.", pod.Name, j.Name, j.ResourceVersion)
+glog.Warningf("VDBG: SKIPPING POD %s RESIZE REQUEST RETRY\n", pod.Name)
 					continue
 				}
 			}
@@ -501,13 +508,17 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 			// only patch new annotation. ignore duplicate
 			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest] != anno[schedulerapi.AnnotationResizeResourcesRequest] {
+glog.Warningf("VDBG: Pod %s (%s)   PATCHING ANNOTATION: %s\n", pod.Name, pod.ResourceVersion, anno)
+//debug.PrintStack()
 				cm.PatchPodResourceAnnotation(pod, anno)
 				glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
 			} else {
 				glog.V(6).Infof("Ignored attempt to patch duplicated annotation %v to pod %s", anno, pod.Name)
 			}
 		}
+glog.Warningf("VDBG: POD %s (%s)  DONE\n", pod.Name, pod.ResourceVersion)
 	}
+glog.Warningf("VDBG: JOB %s (%s)  PATCH_JOB_RES FN EXIT\n----------------------------------------------------\n\n", j.Name, j.ResourceVersion)
 	return nil
 }
 

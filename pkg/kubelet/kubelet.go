@@ -2029,6 +2029,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 	var otherActivePods []*v1.Pod
 	isAcceptable := true
 
+glog.Warningf("VDBG: POd %s (%s)\nANNOT: %#v", pod.Name, pod.ResourceVersion, pod.Annotations)
 	if resizeActionAnnotation, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
 		var conditionStatus v1.ConditionStatus
 		var reason string
@@ -2040,12 +2041,14 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 			conditionStatus = v1.ConditionFalse
 			reason = schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":scheduler"
 			isAcceptable = false
+glog.Warningf("VDBG: POd %s (%s)   DOES NOT FIT. RESCHED BLOCKED BY SCHEDULER\n", pod.Name, pod.ResourceVersion)
 		case schedulerapi.ResizeActionNonePerPDBViolation:
 			// Scheduler determined that pod reschedule for resizing was blocked due to PDB violation, just update pod status and bugout
 			glog.V(4).Infof("Pod '%s' reschedule to resize resources blocked by scheduler due to disruption budget violation. Updating status.", pod.Name)
 			conditionStatus = v1.ConditionFalse
 			reason = schedulerapi.PodResourcesResizeStatusBlockedByPDBViolation + ":scheduler"
 			isAcceptable = false
+glog.Warningf("VDBG: POd %s (%s)   DOES NOT FIT. RESCHED BLOCKED BY SCHEDULER\n", pod.Name, pod.ResourceVersion)
 		case schedulerapi.ResizeActionUpdate:
 			// Pod needs resource update, check for fit
 			activePods := kl.GetActivePods()
@@ -2067,6 +2070,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 					conditionStatus = v1.ConditionFalse
 					reason = schedulerapi.PodResourcesResizeStatusBlockedByPolicy + ":" + failReason
 					isAcceptable = false
+glog.Warningf("VDBG: POd %s (%s)   DOES NOT FIT. RESCHED BLOCKED\n", pod.Name, pod.ResourceVersion)
 				} else {
 					// Kill the pod to allow scheduling replacement with updated resources
 					podName := pod.Name
@@ -2080,6 +2084,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 						utilruntime.HandleError(syncErr)
 					} else {
 						glog.V(4).Infof("Pod '%s' deleted to reschedule with resized resources.", podName)
+glog.Warningf("VDBG: POd %s (%s)   DOES NOT FIT. DELETED FOR RESIZING\n", pod.Name, pod.ResourceVersion)
 					}
 					return false
 				}
@@ -2087,6 +2092,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 				// ResizeSuccessful
 				conditionStatus = v1.ConditionTrue
 				reason = schedulerapi.PodResourcesResizeStatusSuccessful + ":" + "kubelet can accept pod resources resize request"
+glog.Warningf("VDBG: POd %s (%s)  FITS. RESIZING SUCCESS\n", pod.Name, pod.ResourceVersion)
 			}
 		}
 
@@ -2099,6 +2105,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 				LastTransitionTime: metav1.Now(),
 				LastProbeTime:      metav1.Now(),
 			}
+glog.Warningf("VDBG: POd %s (%s)  RESIZING STATUS: %#v\n\n", pod.Name, pod.ResourceVersion, resizeStatus)
 		idx := -1
 		for i, podCondition := range pod.Status.Conditions {
 			if podCondition.Type == v1.PodResourcesResizeStatus {
@@ -2120,6 +2127,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+glog.Warningf("VDBGG: POD_UPDATE %s\n", pod.Name)
 		// For non-delete pod updates, check that resource update, if any, is acceptable
 		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
 			// TODO: We may need to do this from HandlePodAdditions as well - investigate kubelet offline case.

@@ -628,6 +628,7 @@ func (c *configFactory) addPodToCache(obj interface{}) {
 }
 
 func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAction string) {
+glog.Warningf("VDBGG: Pod %s (%s) ACTION %s\n********************\n", newPod.Name, newPod.ResourceVersion, resizeAction)
 	switch schedulerapi.PodResourcesResizeAction(resizeAction) {
 	case schedulerapi.ResizeActionUpdateDone:
 		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesActionVer)

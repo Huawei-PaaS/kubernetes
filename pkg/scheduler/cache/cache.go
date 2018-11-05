@@ -236,12 +236,16 @@ func (cache *schedulerCache) ForgetPod(pod *v1.Pod) error {
 
 // Assumes that lock is already acquired.
 func (cache *schedulerCache) addPod(pod *v1.Pod) {
+//node, _ := cache.nodes[pod.Spec.NodeName]
+//glog.Warningf("VDBG-ADD %s (%s). UID: %s\nADD-5555-NAAR: %#v\nADD-5555-NRRR: %#v\n", pod.Name, pod.ResourceVersion, pod.UID, node.AllocatableResource(), node.RequestedResource())
 	n, ok := cache.nodes[pod.Spec.NodeName]
 	if !ok {
 		n = NewNodeInfo()
 		cache.nodes[pod.Spec.NodeName] = n
 	}
 	n.AddPod(pod)
+//node2, _ := cache.nodes[pod.Spec.NodeName]
+//glog.Warningf("VDBG-ADD %s (%s). UID: %s\nADD-5555-NAAR: %#v\nADD-6666-NRRR: %#v\n", pod.Name, pod.ResourceVersion, pod.UID,  node2.AllocatableResource(), node2.RequestedResource())
 }
 
 // this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
@@ -283,6 +287,8 @@ func (cache *schedulerCache) restorePodResources(oldPod, newPod *v1.Pod, restore
 		glog.Error(errMsg)
 		return errors.New(errMsg)
 	}
+glog.Warningf("VDBGG: RESTORE_CONTAINER: %#v\n", restoreContainersMap)
+fmt.Printf("VDBGG: RESTORE_CONTAINER: %#v\n", restoreContainersMap)
 	for i, container := range newPod.Spec.Containers {
 		if restoreContainer, ok := restoreContainersMap[container.Name]; ok {
 			if restoreContainer.Resources.Requests != nil {
@@ -349,7 +355,9 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 		if podCondition.Type != v1.PodResourcesResizeStatus {
 			continue
 		}
+glog.Warningf("\nVDBGG: pod %s podCnd: %#v\n", newPod.Name, podCondition)
 		actionVer, _ := newPod.Annotations[api.AnnotationResizeResourcesActionVer]
+fmt.Printf("\nVDBGG: pod %s actionVer: %s. podCnd: %#v\n", newPod.Name, actionVer, podCondition)
 		if podCondition.Message == actionVer {
 			// If ResizeStatus shows failure, restore previous resource values
 			if podCondition.Status == v1.ConditionFalse {
@@ -360,6 +368,8 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 			delete(newPod.Annotations, api.AnnotationResizeResourcesPrevious)
 			newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
 			newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdateDone)
+glog.Warningf("VDBGG: pod %s DELETING ACTION_VER, PREVIOUS. MARK FOR UPDATE_DONE\n", newPod.Name)
+fmt.Printf("VDBGG: pod %s DELETING ACTION_VER, PREVIOUS. MARK FOR UPDATE_DONE\n", newPod.Name)
 		}
 		break
 	}
@@ -373,10 +383,12 @@ func (cache *schedulerCache) checkPodDisruptionBudgetOk(pod *v1.Pod) (bool, erro
 		return false, errors.New(errMsg)
 	}
 	for _, pdb := range pdbs {
+glog.Warningf("\n^^^^^^^^\nVDBG: POD_LABEL %v. PDBs: %+v\n^^^^^^^^\n", pod.Labels, pdb)
 		if selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector); err == nil {
 			if selector.Empty() || !selector.Matches(labels.Set(pod.Labels)) {
 				continue
 			}
+glog.Warningf("VDBG: POD LABEL MATCH FOUND\n")
 			if pdb.Status.PodDisruptionsAllowed <= 0 {
 				glog.V(4).Infof("Rescheduling pod %s violates disruption budget %s.", pod.Name, pdb.Name)
 				return false, nil
@@ -439,11 +451,13 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 						return err
 					}
 					if !ok {
+glog.Warningf("VDBG: PDB VIOLATION DETECTED. NOT RESCHEDULING AT THIS TIME. POD (%s) %s - %s\n", newPod.ResourceVersion, newPod.Name, newPod.UID)
 						// Skip rescheduling at this time as it violates PDB. Let the controller retries handle it.
 						newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionNonePerPDBViolation)
 						return nil
 					}
 					glog.V(4).Infof("Rescheduling pod %s as it is within disruption budget.", newPod.Name)
+glog.Warningf("VDBG: PDB OK. RESCHEDULING POD (%s) %s - %s\n", newPod.ResourceVersion, newPod.Name, newPod.UID)
 				}
 				newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
 			}
@@ -457,6 +471,10 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 
 // Assumes that lock is already acquired.
 func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
+glog.Warningf("\n=======================\nVDBG-cache-updatePod:\nOLD_POD: %s (%s)\nOLD_POD_ANNOT: %+v\nOLD_POD_RES: %+v\n", oldPod.Name, oldPod.ResourceVersion, oldPod.Annotations, oldPod.Spec.Containers)
+glog.Warningf("-----------------------\nVDBG-cache-updatePod:\nNEW_POD: %s (%s)\nNEW_POD_ANNOT: %+v\nNEW_POD_RES: %+v\n", newPod.Name, newPod.ResourceVersion, newPod.Annotations, newPod.Spec.Containers)
+//node, _ := cache.nodes[newPod.Spec.NodeName]
+//glog.Warningf("VDBG-UPDATE %s\nUPD-1111-NAAR: %#v\nUPD-1111-NRRR: %#v\n", newPod.Name, node.AllocatableResource(), node.RequestedResource())
 	var err error
 	if err := cache.removePod(oldPod); err != nil {
 		return err
@@ -467,11 +485,16 @@ func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
 		err = cache.processPodResourcesScaling(oldPod, newPod)
 	}
 	cache.addPod(newPod)
+//node4, _ := cache.nodes[newPod.Spec.NodeName]
+//glog.Warningf("VDBG-UPDATE %s\nUPD-2222-NAAR: %#v\nUPD-2222-NRRR: %#v\n", newPod.Name, node4.AllocatableResource(), node4.RequestedResource())
+glog.Warningf("-----------------------\nVDBG-cache-updatePod:\nPROCPOD: %s\nPROPOD_ANNOT: %+v\nPROCPOD_RES: %+v\n=======================\n\n", newPod.Name, newPod.Annotations, newPod.Spec.Containers)
 	return err
 }
 
 // Assumes that lock is already acquired.
 func (cache *schedulerCache) removePod(pod *v1.Pod) error {
+//node, _ := cache.nodes[pod.Spec.NodeName]
+//glog.Warningf("VDBG-DELETE %s (%s). UID: %s\nDEL-7777-NAAR: %#v\nDEL-7777-NRRR: %#v\nPOD_RES: %+v\n", pod.Name, pod.ResourceVersion, pod.UID, node.AllocatableResource(), node.RequestedResource(), pod.Spec.Containers)
 	n := cache.nodes[pod.Spec.NodeName]
 	if err := n.RemovePod(pod); err != nil {
 		return err
@@ -479,6 +502,8 @@ func (cache *schedulerCache) removePod(pod *v1.Pod) error {
 	if len(n.pods) == 0 && n.node == nil {
 		delete(cache.nodes, pod.Spec.NodeName)
 	}
+//node2, _ := cache.nodes[pod.Spec.NodeName]
+//glog.Warningf("VDBG-DELETE %s (%s). UID: %s\nDEL-8888-NAAR: %#v\nDEL-8888-NRRR: %#v\n", pod.Name, pod.ResourceVersion, pod.UID, node2.AllocatableResource(), node2.RequestedResource())
 	return nil
 }
 
@@ -562,6 +587,7 @@ func (cache *schedulerCache) RemovePod(pod *v1.Pod) error {
 			glog.Errorf("Pod %v was assumed to be on %v but got added to %v", key, pod.Spec.NodeName, currState.pod.Spec.NodeName)
 			glog.Fatalf("Schedulercache is corrupted and can badly affect scheduling decisions")
 		}
+glog.Warningf("VDBG-REMOVE-POD %s (%s). UID: %s\n\n##########\n%#v\n##########\n%#v\n##########\n", pod.Name, pod.ResourceVersion, pod.UID, pod, pod.Status)
 		err := cache.removePod(currState.pod)
 		if err != nil {
 			return err
@@ -652,12 +678,14 @@ func (cache *schedulerCache) AddPDB(pdb *policy.PodDisruptionBudget) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
+glog.Warningf("VDBG-ADD-PDB (Ver: %s).\nPDB.SPEC: %+v\nPDB.STATUS: %+v\n", pdb.ResourceVersion, pdb.Spec, pdb.Status)
 	// Unconditionally update cache.
 	cache.pdbs[string(pdb.UID)] = pdb
 	return nil
 }
 
 func (cache *schedulerCache) UpdatePDB(oldPDB, newPDB *policy.PodDisruptionBudget) error {
+glog.Warningf("VDBG-UPDATE-PDB\nOLD: (Ver: %s).\nOLD_PDB.SPEC: %+v\nOLD_PDB.STATUS: %+v\nNEW: (Ver: %s).\nNEW_PDB.SPEC: %+v\nNEW_PDB.STATUS: %+v\n", oldPDB.ResourceVersion, oldPDB.Spec, oldPDB.Status, newPDB.ResourceVersion, newPDB.Spec, newPDB.Status)
 	return cache.AddPDB(newPDB)
 }
 
@@ -665,6 +693,7 @@ func (cache *schedulerCache) RemovePDB(pdb *policy.PodDisruptionBudget) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
+glog.Warningf("VDBG-DELETE-PDB (Ver: %s).\nPDB.SPEC: %+v\nPDB.STATUS: %+v\n", pdb.ResourceVersion, pdb.Spec, pdb.Status)
 	delete(cache.pdbs, string(pdb.UID))
 	return nil
 }
@@ -677,6 +706,7 @@ func (cache *schedulerCache) listPDBs(selector labels.Selector) ([]*policy.PodDi
 			pdbs = append(pdbs, pdb)
 		}
 	}
+glog.Warningf("VDBG-LIST-PDBS: selector: %+v. PDBS: %+v\n", selector, pdbs)
 	return pdbs, nil
 }
 
