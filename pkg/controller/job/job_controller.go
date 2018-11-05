@@ -512,11 +512,11 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 	for _, pod := range pods {
 		// Skip if a resource update is in flight
-		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
-		if _, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
@@ -538,7 +538,7 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 						}
 
 						delete(jm.jobsToReSyncResource, j.UID)
-						glog.V(4).Infof("Retrying Resource resizing for pod %s by job %s version %s.", pod.Name, j.Name, j.ResourceVersion)
+						glog.V(4).Infof("Retrying resource resizing for pod %s by job %s version %s.", pod.Name, j.Name, j.ResourceVersion)
 					}
 				}
 			}
@@ -548,13 +548,8 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 			anno[schedulerapi.AnnotationResizeResourcesRequestVer] = j.ResourceVersion
 			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
 
-			// only patch new annotation. ignore duplicate
-			if pod.Annotations == nil || pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest] != anno[schedulerapi.AnnotationResizeResourcesRequest] {
-				cm.PatchPodResourceAnnotation(pod, anno)
-				glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
-			} else {
-				glog.V(6).Infof("Ignored attempt to patch duplicated annotation %v to pod %s", anno, pod.Name)
-			}
+			cm.PatchPodResourceAnnotation(pod, anno)
+			glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
 		}
 	}
 	return nil

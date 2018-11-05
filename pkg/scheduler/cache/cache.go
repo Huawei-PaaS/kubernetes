@@ -400,7 +400,7 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 		return errors.New(errMsg)
 	}
 
-	// resoure resize policy is defaulted to InPlacePreferred
+	// resource resize policy is defaulted to InPlacePreferred
 	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
 	if _, ok := newPod.Annotations[api.AnnotationResizeResourcesPolicy]; ok {
 		resizeResourcesPolicy = api.PodResourcesResizePolicy(newPod.Annotations[api.AnnotationResizeResourcesPolicy])
