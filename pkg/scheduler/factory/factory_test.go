@@ -597,7 +597,7 @@ func TestProcessPodResizeAction(t *testing.T) {
 			"Test ResizeActionReschedule",
 			string(schedulerapi.ResizeActionReschedule),
 			"",
-			"DeletePodForResizing",
+			"",
 			"delete",
 			[]string{
 				"Normal ResizeActionReschedule Deleting pod to reschedule with resized resources",

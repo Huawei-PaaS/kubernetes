@@ -654,6 +654,7 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 		// Case 2. Node does not have capacity. Delete pod, let controller re-create pod.
 		podName := newPod.Name
 		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesActionVer)
+		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesAction)
 		c.recorder.Eventf(newPod, v1.EventTypeNormal, "ResizeActionReschedule", "Deleting pod to reschedule with resized resources")
 		deleteOptions := metav1.NewDeleteOptions(0)
 		deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(newPod.UID))
