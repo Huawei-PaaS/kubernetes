@@ -764,6 +764,9 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 				glog.Errorf("updateContainerResources %q(id=%q) for pod %q failed: %v", containerInfo.name, containerID, format.Pod(pod), err)
 				return
 			}
+			// UpdateContainerResources successful, update containerStatus.Hash
+			containerStatus := podStatus.FindContainerStatusByName(containerInfo.container.Name)
+			containerStatus.Hash = kubecontainer.HashContainer(containerInfo.container)
 		}
 	}
 
