@@ -38,51 +38,6 @@ const (
 	MaxWeight = MaxInt / MaxPriority
 )
 
-// Annotations used for vertical resources resizing policy, request, action, and restore
-const (
-	AnnotationResizeResourcesPolicy     = "scheduler.alpha.kubernetes.io/resize-resources-policy"
-	AnnotationResizeResourcesRequestVer = "scheduler.alpha.kubernetes.io/resize-resources-request-version"
-	AnnotationResizeResourcesRequest    = "scheduler.alpha.kubernetes.io/resize-resources-request"
-	AnnotationResizeResourcesActionVer  = "scheduler.alpha.kubernetes.io/resize-resources-action-version"
-	AnnotationResizeResourcesAction     = "scheduler.alpha.kubernetes.io/resize-resources-action"
-	AnnotationResizeResourcesPrevious   = "scheduler.alpha.kubernetes.io/resize-resources-previous"
-)
-
-// PodResourcesResizePolicy controls how pod resources are vertically resized by the scheduler.
-// Only one of the following resize policies may be specified.
-// ResizePolicyInPlacePreferred: Scheduler will try restart-free resizing, failing which it restarts pod.
-// ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
-// ResizePolicyRestart: Scheduler will resize the pod by restarting it.
-// If none of the following policies is specified, the default one
-// is ResizePolicyInPlacePreferred.
-type PodResourcesResizePolicy string
-const (
-        ResizePolicyInPlacePreferred PodResourcesResizePolicy = "InPlacePreferred"
-        ResizePolicyInPlaceOnly      PodResourcesResizePolicy = "InPlaceOnly"
-        ResizePolicyRestart          PodResourcesResizePolicy = "Restart"
-)
-
-// PodResourcesResizeAction is the action determined by scheduler in response to pod vertical resize request.
-type PodResourcesResizeAction string
-const (
-	ResizeActionUpdate              PodResourcesResizeAction = "UpdatePodForResizing"
-	ResizeActionReschedule          PodResourcesResizeAction = "DeletePodForResizing"
-	ResizeActionNonePerPolicy       PodResourcesResizeAction = "PodNotResizedDueToPolicy"
-	ResizeActionNonePerPDBViolation PodResourcesResizeAction = "PodNotResizedDueToPDBViolation"
-	ResizeActionUpdateDone          PodResourcesResizeAction = "UpdatePodResizingDone"
-)
-
-const (
-	// Pod not rescheduled to resize resources due to InPlaceOnly policy
-	PodResourcesResizeStatusBlockedByPolicy       = "PodNotResizedDueToPolicy"
-	// Pod not rescheduled to resize resources due to PDB violation
-	PodResourcesResizeStatusBlockedByPDBViolation = "PodNotResizedDueToPDBViolation"
-	// Pod resources resizing request failed
-	PodResourcesResizeStatusFailed                = "PodResourceResizeFailed"
-	// Pod resources resizing request was successful
-	PodResourcesResizeStatusSuccessful            = "PodResourceResizeSuccessful"
-)
-
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Policy describes a struct of a policy resource in api.

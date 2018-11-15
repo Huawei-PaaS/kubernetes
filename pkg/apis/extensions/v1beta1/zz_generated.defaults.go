@@ -181,6 +181,18 @@ func SetObjectDefaults_DaemonSet(in *v1beta1.DaemonSet) {
 			}
 		}
 	}
+	if in.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Spec.Template.Spec.ResizeResources.Request[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+	}
 }
 
 func SetObjectDefaults_DaemonSetList(in *v1beta1.DaemonSetList) {
@@ -326,6 +338,18 @@ func SetObjectDefaults_Deployment(in *v1beta1.Deployment) {
 					v1.SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 				}
 			}
+		}
+	}
+	if in.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Spec.Template.Spec.ResizeResources.Request[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
 		}
 	}
 }
@@ -495,6 +519,18 @@ func SetObjectDefaults_ReplicaSet(in *v1beta1.ReplicaSet) {
 					v1.SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 				}
 			}
+		}
+	}
+	if in.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Spec.Template.Spec.ResizeResources.Request[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
 		}
 	}
 }

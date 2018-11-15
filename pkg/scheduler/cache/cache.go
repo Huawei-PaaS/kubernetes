@@ -17,7 +17,6 @@ limitations under the License.
 package cache
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -29,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
-	"k8s.io/kubernetes/pkg/scheduler/api"
 
 	"github.com/golang/glog"
 	policy "k8s.io/api/policy/v1beta1"
@@ -245,20 +243,14 @@ func (cache *schedulerCache) addPod(pod *v1.Pod) {
 }
 
 // this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
-func getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[string]v1.Container, *Resource, error) {
-	var resizeContainers []v1.Container
-
-	if err := json.Unmarshal([]byte(resizeRequestAnnotation), &resizeContainers); err != nil {
-		errMsg := fmt.Sprintf("Pod %s unmarshalling resource resize annotation '%s' failed. Error: %v", pod.Name, resizeRequestAnnotation, err)
-		glog.Error(errMsg)
-		return nil, nil, errors.New(errMsg)
-	}
-
+func getPodResizeRequirements(pod *v1.Pod) (map[string]v1.Container, *Resource, error) {
 	resizeContainersMap := make(map[string]v1.Container)
-	for _, resizeContainer := range resizeContainers {
-		resizeContainersMap[resizeContainer.Name] = resizeContainer
+	for _, c := range pod.Spec.ResizeResources.Request {
+		resizeContainersMap[c.Name] = v1.Container{
+							Name:      c.Name,
+							Resources: c.Resources,
+						}
 	}
-
 	podResource := &Resource{}
 	for _, container := range pod.Spec.Containers {
 		containerResourcesRequests := container.Resources.Requests.DeepCopy()
@@ -269,53 +261,48 @@ func getPodResizeRequirements(pod *v1.Pod, resizeRequestAnnotation string) (map[
 		}
 		podResource.Add(containerResourcesRequests)
 	}
-
 	return resizeContainersMap, podResource, nil
 }
 
-func (cache *schedulerCache) restorePodResources(oldPod, newPod *v1.Pod, restoreResources string) error {
+func (cache *schedulerCache) rollbackPodResources(oldPod, newPod *v1.Pod) {
 	podKey, _ := getPodKey(oldPod)
 	currPodState, _ := cache.podStates[podKey]
 	cachedPod := currPodState.pod
-	restoreContainersMap := make(map[string]v1.Container)
-	if err := json.Unmarshal([]byte(restoreResources), &restoreContainersMap); err != nil {
-		errMsg := fmt.Sprintf("Pod %s unmarshalling restore resource annotation '%s' failed. Error: %v", newPod.Name, restoreResources, err)
-		glog.Error(errMsg)
-		return errors.New(errMsg)
-	}
 	for i, container := range newPod.Spec.Containers {
-		if restoreContainer, ok := restoreContainersMap[container.Name]; ok {
-			if restoreContainer.Resources.Requests != nil {
-				newPod.Spec.Containers[i].Resources.Requests = restoreContainer.Resources.Requests.DeepCopy()
-				cachedPod.Spec.Containers[i].Resources.Requests = restoreContainer.Resources.Requests.DeepCopy()
-			}
-			if restoreContainer.Resources.Limits != nil {
-				newPod.Spec.Containers[i].Resources.Limits = restoreContainer.Resources.Limits.DeepCopy()
-				cachedPod.Spec.Containers[i].Resources.Limits = restoreContainer.Resources.Limits.DeepCopy()
+		for _, rollbackResources := range newPod.Spec.ResizeResources.Rollback {
+			if rollbackResources.Name == container.Name {
+				if rollbackResources.Resources.Requests != nil {
+					newPod.Spec.Containers[i].Resources.Requests = rollbackResources.Resources.Requests.DeepCopy()
+					cachedPod.Spec.Containers[i].Resources.Requests = rollbackResources.Resources.Requests.DeepCopy()
+				}
+				if rollbackResources.Resources.Limits != nil {
+					newPod.Spec.Containers[i].Resources.Limits = rollbackResources.Resources.Limits.DeepCopy()
+					cachedPod.Spec.Containers[i].Resources.Limits = rollbackResources.Resources.Limits.DeepCopy()
+				}
+				break
 			}
 		}
 	}
-	return nil
 }
 
-func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, resizeContainersMap map[string]v1.Container) error {
+func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, resizeContainersMap map[string]v1.Container) {
 	podKey, _ := getPodKey(oldPod)
 	currPodState, _ := cache.podStates[podKey]
 	cachedPod := currPodState.pod
-	restoreContainersMap := make(map[string]v1.Container)
+	var rollbackResources []v1.ContainerResources
 
 	for i, container := range newPod.Spec.Containers {
 		resizeContainer, ok := resizeContainersMap[container.Name]
 		if ok {
 			// Backup current container resources for restore in case of update failure
-			restoreContainer := v1.Container{
-				Name: container.Name,
-				Resources: v1.ResourceRequirements{
-					Requests: container.Resources.Requests.DeepCopy(),
-					Limits:   container.Resources.Limits.DeepCopy(),
-				},
-			}
-			restoreContainersMap[container.Name] = restoreContainer
+			rollbackRes := v1.ContainerResources{
+						Name:      container.Name,
+						Resources: v1.ResourceRequirements{
+							Requests: container.Resources.Requests.DeepCopy(),
+							Limits:   container.Resources.Limits.DeepCopy(),
+						},
+					}
+			rollbackResources = append(rollbackResources, rollbackRes)
 			// Validation checks ensure pod QoS invariance, just update changed values
 			if resizeContainer.Resources.Requests != nil {
 				for k, v := range resizeContainer.Resources.Requests {
@@ -331,17 +318,9 @@ func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, re
 			}
 		}
 	}
-
-	if restoreResourcesJson, err := json.Marshal(restoreContainersMap); err != nil {
-		errMsg := fmt.Sprintf("Pod %s restore resources json marshal failed. Error: %v", newPod.Name, err)
-		glog.Error(errMsg)
-		return errors.New(errMsg)
-	} else {
-		newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
-		newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdate)
-		newPod.Annotations[api.AnnotationResizeResourcesPrevious] = string(restoreResourcesJson)
-	}
-	return nil
+	newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
+	newPod.Spec.ResizeResources.Action = v1.ResizeActionUpdate
+	newPod.Spec.ResizeResources.Rollback = rollbackResources
 }
 
 func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
@@ -350,18 +329,17 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 		if podCondition.Type != v1.PodResourcesResizeStatus {
 			continue
 		}
-		actionVer, _ := newPod.Annotations[api.AnnotationResizeResourcesActionVer]
-		if podCondition.Message == actionVer {
+		if podCondition.Message == newPod.Spec.ResizeResources.ActionVersion {
 			// If ResizeStatus shows failure, restore previous resource values
 			if podCondition.Status == v1.ConditionFalse {
-				if previousResources, ok := newPod.Annotations[api.AnnotationResizeResourcesPrevious]; ok {
+				if newPod.Spec.ResizeResources.Rollback != nil {
 					glog.V(4).Infof("Restoring resource values for pod %v due to a failed earlier resizing attempt", oldPod.Name)
-					cache.restorePodResources(oldPod, newPod, previousResources)
+					cache.rollbackPodResources(oldPod, newPod)
 				}
 			}
-			delete(newPod.Annotations, api.AnnotationResizeResourcesPrevious)
-			newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
-			newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionUpdateDone)
+			newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
+			newPod.Spec.ResizeResources.Action = v1.ResizeActionUpdateDone
+			newPod.Spec.ResizeResources.Rollback = nil
 		}
 		break
 	}
@@ -400,40 +378,40 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 		return errors.New(errMsg)
 	}
 
-	// resource resize policy is defaulted to InPlacePreferred
-	resizeResourcesPolicy := api.ResizePolicyInPlacePreferred
-	if _, ok := newPod.Annotations[api.AnnotationResizeResourcesPolicy]; ok {
-		resizeResourcesPolicy = api.PodResourcesResizePolicy(newPod.Annotations[api.AnnotationResizeResourcesPolicy])
+	// resource resize policy defaults to InPlacePreferred
+	resizeResourcesPolicy := v1.ResizePolicyInPlacePreferred
+	if newPod.Spec.ResizeResourcesPolicy != "" {
+		resizeResourcesPolicy = newPod.Spec.ResizeResourcesPolicy
 	}
 
 	cache.processPodResizeStatus(oldPod, newPod)
 
-	if resizeRequestAnnotation, ok := newPod.Annotations[api.AnnotationResizeResourcesRequest]; ok {
-		delete(newPod.Annotations, api.AnnotationResizeResourcesRequest)
-
-		if resizeResourcesPolicy == api.ResizePolicyRestart {
-			newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
-			newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
+	if len(newPod.Spec.ResizeResources.Request) != 0 {
+		if resizeResourcesPolicy == v1.ResizePolicyRestart {
+			newPod.Spec.ResizeResources.Request = nil
+			newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
+			newPod.Spec.ResizeResources.Action = v1.ResizeActionReschedule
 			glog.V(4).Infof("Rescheduling pod %s due to ResizePolicyRestart.", newPod.Name)
 			return nil
 		}
 
-		if resizeContainersMap, podResource, err := getPodResizeRequirements(newPod, resizeRequestAnnotation); err == nil {
+		if resizeContainersMap, podResource, err := getPodResizeRequirements(newPod); err == nil {
+			newPod.Spec.ResizeResources.Request = nil
 			allocatable := node.AllocatableResource()
 			nodeMilliCPU := node.RequestedResource().MilliCPU
 			nodeMemory := node.RequestedResource().Memory
 			if (allocatable.MilliCPU > (podResource.MilliCPU + nodeMilliCPU)) &&
 				(allocatable.Memory > (podResource.Memory + nodeMemory)) {
 				// InPlace resizing is possible
-				return cache.setupInPlaceResizeAction(oldPod, newPod, resizeContainersMap)
+				cache.setupInPlaceResizeAction(oldPod, newPod, resizeContainersMap)
+				return nil
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy
-				newPod.Annotations[api.AnnotationResizeResourcesActionVer] = string(newPod.ResourceVersion)
-				if resizeResourcesPolicy == api.ResizePolicyInPlaceOnly {
-					newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionNonePerPolicy)
+				newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
+				if resizeResourcesPolicy == v1.ResizePolicyInPlaceOnly {
+					newPod.Spec.ResizeResources.Action = v1.ResizeActionNonePerPolicy
 					glog.V(4).Infof("In-place resizing of pod %s on node %s rejected by policy (%s). Allocatable CPU: %d, Memory: %d. Requested: CPU: %d, Memory %d.",
-						newPod.Name, newPod.Spec.NodeName, resizeResourcesPolicy, allocatable.MilliCPU, allocatable.Memory,
-						podResource.MilliCPU, podResource.Memory)
+						newPod.Name, newPod.Spec.NodeName, resizeResourcesPolicy, allocatable.MilliCPU, allocatable.Memory, podResource.MilliCPU, podResource.Memory)
 					return nil
 				}
 				// Check for pod disruption budget violations
@@ -444,12 +422,12 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 					}
 					if !ok {
 						// Skip rescheduling at this time as it violates PDB. Let the controller retries handle it.
-						newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionNonePerPDBViolation)
+						newPod.Spec.ResizeResources.Action = v1.ResizeActionNonePerPDBViolation
 						return nil
 					}
 					glog.V(4).Infof("Rescheduling pod %s as it is within disruption budget.", newPod.Name)
 				}
-				newPod.Annotations[api.AnnotationResizeResourcesAction] = string(api.ResizeActionReschedule)
+				newPod.Spec.ResizeResources.Action = v1.ResizeActionReschedule
 			}
 		} else {
 			glog.Errorf("Pod %s getPodResizeRequirements failed. Error: %v", newPod.Name, err)
@@ -467,7 +445,8 @@ func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
 	}
 	// Resize request is valid for running pods
 	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
-		oldPod.Status.Phase == v1.PodRunning && newPod.Status.Phase == v1.PodRunning && newPod.DeletionTimestamp == nil {
+		oldPod.Status.Phase == v1.PodRunning && newPod.Status.Phase == v1.PodRunning &&
+		newPod.DeletionTimestamp == nil && newPod.Spec.ResizeResources != nil {
 		err = cache.processPodResourcesScaling(oldPod, newPod)
 	}
 	cache.addPod(newPod)

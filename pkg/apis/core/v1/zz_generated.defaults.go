@@ -306,6 +306,18 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 			}
 		}
 	}
+	if in.Spec.ResizeResources != nil {
+		for i := range in.Spec.ResizeResources.Request {
+			a := &in.Spec.ResizeResources.Request[i]
+			SetDefaults_ResourceList(&a.Resources.Limits)
+			SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.ResizeResources.Rollback {
+			a := &in.Spec.ResizeResources.Rollback[i]
+			SetDefaults_ResourceList(&a.Resources.Limits)
+			SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+	}
 }
 
 func SetObjectDefaults_PodList(in *v1.PodList) {
@@ -450,6 +462,18 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 					SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 				}
 			}
+		}
+	}
+	if in.Template.Spec.ResizeResources != nil {
+		for i := range in.Template.Spec.ResizeResources.Request {
+			a := &in.Template.Spec.ResizeResources.Request[i]
+			SetDefaults_ResourceList(&a.Resources.Limits)
+			SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Template.Spec.ResizeResources.Rollback {
+			a := &in.Template.Spec.ResizeResources.Rollback[i]
+			SetDefaults_ResourceList(&a.Resources.Limits)
+			SetDefaults_ResourceList(&a.Resources.Requests)
 		}
 	}
 }
@@ -598,6 +622,18 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 						SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 					}
 				}
+			}
+		}
+		if in.Spec.Template.Spec.ResizeResources != nil {
+			for i := range in.Spec.Template.Spec.ResizeResources.Request {
+				a := &in.Spec.Template.Spec.ResizeResources.Request[i]
+				SetDefaults_ResourceList(&a.Resources.Limits)
+				SetDefaults_ResourceList(&a.Resources.Requests)
+			}
+			for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
+				a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
+				SetDefaults_ResourceList(&a.Resources.Limits)
+				SetDefaults_ResourceList(&a.Resources.Requests)
 			}
 		}
 	}

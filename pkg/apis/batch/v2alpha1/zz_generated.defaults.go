@@ -174,6 +174,18 @@ func SetObjectDefaults_CronJob(in *v2alpha1.CronJob) {
 			}
 		}
 	}
+	if in.Spec.JobTemplate.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Spec.JobTemplate.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Spec.JobTemplate.Spec.Template.Spec.ResizeResources.Request[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.JobTemplate.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Spec.JobTemplate.Spec.Template.Spec.ResizeResources.Rollback[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+	}
 }
 
 func SetObjectDefaults_CronJobList(in *v2alpha1.CronJobList) {
@@ -318,6 +330,18 @@ func SetObjectDefaults_JobTemplate(in *v2alpha1.JobTemplate) {
 					v1.SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 				}
 			}
+		}
+	}
+	if in.Template.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Template.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Template.Spec.Template.Spec.ResizeResources.Request[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Template.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Template.Spec.Template.Spec.ResizeResources.Rollback[i]
+			v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			v1.SetDefaults_ResourceList(&a.Resources.Requests)
 		}
 	}
 }

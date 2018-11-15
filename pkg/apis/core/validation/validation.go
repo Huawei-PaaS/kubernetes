@@ -3507,6 +3507,11 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod) field.ErrorList {
 		mungedPod.Spec.ActiveDeadlineSeconds = &activeDeadlineSeconds
 	}
 
+	// Allow updating ResizeResources
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		mungedPod.Spec.ResizeResources = oldPod.Spec.ResizeResources
+	}
+
 	// Allow only additions to tolerations updates.
 	mungedPod.Spec.Tolerations = oldPod.Spec.Tolerations
 	allErrs = append(allErrs, validateOnlyAddedTolerations(newPod.Spec.Tolerations, oldPod.Spec.Tolerations, specPath.Child("tolerations"))...)

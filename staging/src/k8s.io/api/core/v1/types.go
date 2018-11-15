@@ -2692,6 +2692,57 @@ type PodReadinessGate struct {
 	ConditionType PodConditionType `json:"conditionType" protobuf:"bytes,1,opt,name=conditionType,casttype=PodConditionType"`
 }
 
+// PodResizeResourcesPolicy controls how pod resources are vertically resized by the scheduler.
+// Only one of the following resize policies may be specified.
+// ResizePolicyInPlacePreferred: Scheduler will try restart-free resizing, failing which it restarts pod.
+// ResizePolicyInPlaceOnly: Scheduler will try restart-free resizing, does not restart pod if attempt fails.
+// ResizePolicyRestart: Scheduler will resize the pod by restarting it.
+// If none of the following policies is specified, the default one
+// is ResizePolicyInPlacePreferred.
+type PodResizeResourcesPolicy string
+const (
+	ResizePolicyInPlacePreferred PodResizeResourcesPolicy = "InPlacePreferred"
+	ResizePolicyInPlaceOnly      PodResizeResourcesPolicy = "InPlaceOnly"
+	ResizePolicyRestart          PodResizeResourcesPolicy = "Restart"
+)
+
+// PodResizeResourcesAction is the action determined by scheduler in response to pod vertical resize resources request.
+type PodResizeResourcesAction string
+const (
+	ResizeActionUpdate              PodResizeResourcesAction = "UpdatePodForResizing"
+	ResizeActionReschedule          PodResizeResourcesAction = "DeletePodForResizing"
+	ResizeActionNonePerPolicy       PodResizeResourcesAction = "PodNotResizedDueToPolicy"
+	ResizeActionNonePerPDBViolation PodResizeResourcesAction = "PodNotResizedDueToPDBViolation"
+	ResizeActionUpdateDone          PodResizeResourcesAction = "UpdatePodResizingDone"
+)
+
+// ContainerResources holds request and rollback resources information related to handling of pod resources resizing.
+type ContainerResources struct {
+	Name      string
+	Resources ResourceRequirements
+}
+
+// PodResizeResources holds information related to handling of a pod resources vertical resizing request.
+type PodResizeResources struct {
+	RequestVersion string `json:"requestVersion,omitempty" protobuf:"bytes,1,opt,name=requestVersion"`
+	Request        []ContainerResources `json:"request,omitempty" protobuf:"bytes,2,rep,name=request,casttype=ContainerResources"`
+	ActionVersion  string `json:"actionVersion,omitempty" protobuf:"bytes,3,opt,name=actionVersion"`
+	Action         PodResizeResourcesAction `json:"action,omitempty" protobuf:"bytes,4,opt,name=action,casttype=PodResizeResourcesAction"`
+	Rollback       []ContainerResources `json:"rollback,omitempty" protobuf:"bytes,5,opt,name=rollback,casttype=ContainerResources"`
+}
+
+// Status of the last pod resize resources request status that is set in Pod Conditions
+const (
+	// Pod not rescheduled to resize resources due to InPlaceOnly policy
+	PodResizeResourcesStatusBlockedByPolicy       = "PodNotResizedDueToPolicy"
+	// Pod not rescheduled to resize resources due to PDB violation
+	PodResizeResourcesStatusBlockedByPDBViolation = "PodNotResizedDueToPDBViolation"
+	// Pod resources resizing request failed
+	PodResizeResourcesStatusFailed                = "PodResourceResizeFailed"
+	// Pod resources resizing request was successful
+	PodResizeResourcesStatusSuccessful            = "PodResourceResizeSuccessful"
+)
+
 // PodSpec is a description of a pod.
 type PodSpec struct {
 	// List of volumes that can be mounted by containers belonging to the pod.
@@ -2863,6 +2914,15 @@ type PodSpec struct {
 	// More info: https://github.com/kubernetes/community/blob/master/keps/sig-network/0007-pod-ready%2B%2B.md
 	// +optional
 	ReadinessGates []PodReadinessGate `json:"readinessGates,omitempty" protobuf:"bytes,28,opt,name=readinessGates"`
+
+	// Pod resize resources policy controls the action taken during vertical resizing of pod resources
+	// One of InPlacePreferred, InPlaceOnly, Restart.
+	// Defaults to InPlacePreferred.
+	// +optional
+	ResizeResourcesPolicy PodResizeResourcesPolicy `json:"resizeResourcesPolicy,omitempty" protobuf:"bytes,29,opt,name=resizeResourcesPolicy,casttype=PodResizeResourcesPolicy"`
+	// Pod resources vertical resizing information
+	// +optional
+	ResizeResources *PodResizeResources `json:"resizeResources,omitempty" protobuf:"bytes,30,opt,name=resizeResources,casttype=PodResizeResources"`
 }
 
 // HostAlias holds the mapping between IP and hostnames that will be injected as an entry in the

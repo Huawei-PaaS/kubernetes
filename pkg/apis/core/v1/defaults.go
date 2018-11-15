@@ -181,6 +181,9 @@ func SetDefaults_PodSpec(obj *v1.PodSpec) {
 	if obj.SchedulerName == "" {
 		obj.SchedulerName = v1.DefaultSchedulerName
 	}
+	if obj.ResizeResourcesPolicy == "" {
+		obj.ResizeResourcesPolicy = v1.ResizePolicyInPlacePreferred
+	}
 }
 func SetDefaults_Probe(obj *v1.Probe) {
 	if obj.TimeoutSeconds == 0 {

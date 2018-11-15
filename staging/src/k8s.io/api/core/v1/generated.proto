@@ -2907,6 +2907,33 @@ message PodSignature {
   optional k8s.io.apimachinery.pkg.apis.meta.v1.OwnerReference podController = 1;
 }
 
+// ContainerResources holds request and rollback resources information related to handling of pod resources resizing.
+message ContainerResources {
+  // Name of the container
+  optional string name = 1;
+
+  // ResourceRequirements for the container
+  optional ResourceRequirement resources = 2;
+}
+
+// PodResizeResources contains details for vertical resizing of pod resources.
+message PodResizeResources {
+  // RequestVersion holds the ResourceVersion of the controller requesting pod resizing.
+  optional string requestVersion = 1;
+
+  // Request holds the desired resources values for containers in the pod.
+  repeated ContainerResources request = 2;
+
+  // ActionVersion holds the ResourceVersion of the pod that triggers resizing action.
+  optional string actionVersion = 3;
+
+  // Action holds the resources resizing action determined by scheduler.
+  optional string action = 4;
+
+  // Rollback holds the previous resources values for containers resized by scheduler.
+  repeated ContainerResources rollback = 5;
+}
+
 // PodSpec is a description of a pod.
 message PodSpec {
   // List of volumes that can be mounted by containers belonging to the pod.
@@ -3102,6 +3129,16 @@ message PodSpec {
   // More info: https://github.com/kubernetes/community/blob/master/keps/sig-network/0007-pod-ready%2B%2B.md
   // +optional
   repeated PodReadinessGate readinessGates = 28;
+
+  // resizeResourcesPolicy holds the policy guiding pod resources resizing.
+  // One of InPlacePreferred, InPlaceOnly, Restart.
+  // Defaults to InPlacePreferred.
+  // +optional
+  optional string resizeResourcesPolicy = 29;
+
+  // resizeResources holds the vertical resources resizing related information.
+  // +optional
+  optional PodResizeResources resizeResources = 30;
 }
 
 // PodStatus represents information about the status of a pod. Status may trail the actual

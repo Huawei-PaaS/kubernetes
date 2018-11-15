@@ -173,6 +173,18 @@ func SetObjectDefaults_Job(in *v1.Job) {
 			}
 		}
 	}
+	if in.Spec.Template.Spec.ResizeResources != nil {
+		for i := range in.Spec.Template.Spec.ResizeResources.Request {
+			a := &in.Spec.Template.Spec.ResizeResources.Request[i]
+			core_v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			core_v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+		for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
+			a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
+			core_v1.SetDefaults_ResourceList(&a.Resources.Limits)
+			core_v1.SetDefaults_ResourceList(&a.Resources.Requests)
+		}
+	}
 }
 
 func SetObjectDefaults_JobList(in *v1.JobList) {

@@ -17,7 +17,6 @@ limitations under the License.
 package job
 
 import (
-	"encoding/json"
 	"fmt"
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
@@ -41,7 +40,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/features"
-	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/util/metrics"
 	"math"
 	"reflect"
@@ -296,15 +294,9 @@ func (jm *JobController) updatePod(old, cur interface{}) {
 
 	// retry (enqueue) jobs failed from resource update
 	if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && !hasFailedResourceResizeStatus(curPod) {
-
-		// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
-		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
-			// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
-			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
-				if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
-					jm.enqueueResourceUpdateForRetry()
-				}
-			}
+		// If resize resources request isn't pending, previous resize attempt failed. queue for retry
+		if len(curPod.Spec.ResizeResources.Request) == 0 && curPod.Spec.ResizeResources.Action == "" {
+			jm.enqueueResourceUpdateForRetry()
 		}
 	}
 
@@ -503,8 +495,6 @@ func mergeResourceChanges(pod *v1.Pod, cMap map[string]*v1.Container) []v1.Conta
 }
 
 func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
-	cm := controller.NewPodControllerRefManager(jm.podControl, j, nil, controllerKind, nil)
-
 	cMap := make(map[string]*v1.Container)
 	for i, container := range j.Spec.Template.Spec.Containers {
 		cMap[container.Name] = &(j.Spec.Template.Spec.Containers[i])
@@ -512,44 +502,50 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 	for _, pod := range pods {
 		// Skip if a resource update is in flight
-		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
-			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
-			continue
-		}
-		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+		if pod.Spec.ResizeResources != nil && (len(pod.Spec.ResizeResources.Request) != 0 || pod.Spec.ResizeResources.Action != "") {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
-			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
-
+			if pod.Spec.ResizeResources != nil && pod.Spec.ResizeResources.RequestVersion == j.ResourceVersion {
 				// This is not a new request, check if earlier request failed.
 				for _, podCondition := range pod.Status.Conditions {
 					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
 						// queue this job for resource update retry (when there's pod update and/or deletion)
 						if _, ok := jm.jobsToReSyncResource[j.UID]; !ok {
-
 							jm.jobsToReSyncResource[j.UID] = j
 							glog.V(4).Infof("Added job %s to retry resoruce queue", j.Name)
-
 							return nil
 						}
-
 						delete(jm.jobsToReSyncResource, j.UID)
 						glog.V(4).Infof("Retrying resource resizing for pod %s by job %s version %s.", pod.Name, j.Name, j.ResourceVersion)
 					}
 				}
 			}
 
-			anno := make(map[string]string)
-			jsonStr, _ := json.Marshal(resourceUpdates)
-			anno[schedulerapi.AnnotationResizeResourcesRequestVer] = j.ResourceVersion
-			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
+			var resourcesRequest []v1.ContainerResources
+			for _, c := range resourceUpdates {
+				resReq := v1.ContainerResources{
+							Name:      c.Name,
+							Resources: c.Resources,
+						}
+				resourcesRequest = append(resourcesRequest, resReq)
+			}
+			pod.Spec.ResizeResources = &v1.PodResizeResources{
+								RequestVersion: j.ResourceVersion,
+								Request:        resourcesRequest,
+							}
 
-			cm.PatchPodResourceAnnotation(pod, anno)
-			glog.V(6).Infof("Adding resource update annotation %v to pod %s", anno, pod.Name)
+			updatedPod, err := jm.kubeClient.CoreV1().Pods(pod.Namespace).Update(pod)
+			if err != nil {
+				glog.Errorf("Error updating pod '%s' for resizing resources: %v", pod.Name, err)
+				jm.recorder.Eventf(pod, v1.EventTypeWarning, "ResizeRequest", "Pod update error: %v", err)
+			} else {
+				glog.V(4).Infof("Pod '%s' updated for resizing resources", updatedPod.Name)
+				jm.recorder.Eventf(updatedPod, v1.EventTypeNormal, "ResizeRequest", "Requested resources resizing")
+			}
 		}
 	}
 	return nil

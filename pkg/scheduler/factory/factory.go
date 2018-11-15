@@ -627,11 +627,11 @@ func (c *configFactory) addPodToCache(obj interface{}) {
 	// handled optimistically in: pkg/scheduler/scheduler.go#assume()
 }
 
-func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAction string) {
-	switch schedulerapi.PodResourcesResizeAction(resizeAction) {
-	case schedulerapi.ResizeActionUpdateDone:
-		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesActionVer)
-		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesAction)
+func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod) {
+	switch newPod.Spec.ResizeResources.Action {
+	case v1.ResizeActionUpdateDone:
+		newPod.Spec.ResizeResources.ActionVersion = ""
+		newPod.Spec.ResizeResources.Action = ""
 		updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
 		if err != nil {
 			glog.Errorf("Pod '%s' resize resources done update error: %v", newPod.Name, err)
@@ -640,7 +640,7 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 			glog.V(4).Infof("Pod '%s' resize resources request handling is complete", updatedPod.Name)
 			c.recorder.Eventf(updatedPod, v1.EventTypeNormal, "ResizeRequestComplete", "Pod resize resources request handling complete")
 		}
-	case schedulerapi.ResizeActionUpdate:
+	case v1.ResizeActionUpdate:
 		// Case 1. Node has capacity. Update.
 		c.recorder.Eventf(newPod, v1.EventTypeNormal, "ResizeActionUpdate", "Updating pod to resize resources")
 		updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
@@ -650,11 +650,11 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 		} else {
 			glog.V(4).Infof("Pod '%s' updated for resizing resources", updatedPod.Name)
 		}
-	case schedulerapi.ResizeActionReschedule:
+	case v1.ResizeActionReschedule:
 		// Case 2. Node does not have capacity. Delete pod, let controller re-create pod.
 		podName := newPod.Name
-		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesActionVer)
-		delete(newPod.Annotations, schedulerapi.AnnotationResizeResourcesAction)
+		newPod.Spec.ResizeResources.ActionVersion = ""
+		newPod.Spec.ResizeResources.Action = ""
 		c.recorder.Eventf(newPod, v1.EventTypeNormal, "ResizeActionReschedule", "Deleting pod to reschedule with resized resources")
 		deleteOptions := metav1.NewDeleteOptions(0)
 		deleteOptions.Preconditions = metav1.NewUIDPreconditions(string(newPod.UID))
@@ -664,7 +664,7 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 		} else {
 			glog.V(4).Infof("Pod '%s' deleted to reschedule with resized resources", podName)
 		}
-	case schedulerapi.ResizeActionNonePerPolicy:
+	case v1.ResizeActionNonePerPolicy:
 		// Case 3. Node does not have capacity. Pod reschedule blocked by policy. Update pod.
 		c.recorder.Eventf(newPod, v1.EventTypeNormal, "ResizeBlockedByPolicy", "Pod not rescheduled for resizing resources due to policy")
 		updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
@@ -673,7 +673,7 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 		} else {
 			glog.V(4).Infof("Pod '%s' not rescheduled for resizing resources due to policy", updatedPod.Name)
 		}
-	case schedulerapi.ResizeActionNonePerPDBViolation:
+	case v1.ResizeActionNonePerPDBViolation:
 		// Case 4. Pod reschedule blocked because it violates PDB. Update pod.
 		c.recorder.Eventf(newPod, v1.EventTypeNormal, "ResizeBlockedByPDBViolation", "Pod not rescheduled for resizing resources due to disruption budget")
 		updatedPod, err := c.client.CoreV1().Pods(newPod.Namespace).Update(newPod)
@@ -683,6 +683,7 @@ func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAct
 			glog.V(4).Infof("Pod '%s' not rescheduled for resizing resources due to disruption budget violation", updatedPod.Name)
 		}
 	default:
+		glog.Errorf("Error processing unknown action '%v' for  pod '%s'", newPod.Spec.ResizeResources.Action, newPod.Name)
 	}
 }
 
@@ -706,11 +707,10 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	}
 
 	// Process pod resize action if set
-	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
-		if resizeActionAnnotation, ok := newPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok &&
-			newPod.ResourceVersion == newPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer] {
-			c.processPodResizeAction(oldPod, newPod, resizeActionAnnotation)
-		}
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
+		newPod.Spec.ResizeResources != nil && newPod.Spec.ResizeResources.Action != "" &&
+		newPod.ResourceVersion == newPod.Spec.ResizeResources.ActionVersion {
+		c.processPodResizeAction(oldPod, newPod)
 	}
 
 	c.invalidateCachedPredicatesOnUpdatePod(newPod, oldPod)
