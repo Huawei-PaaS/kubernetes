@@ -2626,9 +2626,6 @@ type PodSpec struct {
 	// Defaults to InPlacePreferred.
 	// +optional
 	ResizeResourcesPolicy PodResizeResourcesPolicy
-	// Pod resources vertical resizing information
-	// +optional
-	ResizeResources *PodResizeResources
 }
 
 // HostAlias holds the mapping between IP and hostnames that will be injected as an entry in the
@@ -2828,6 +2825,13 @@ type PodStatusResult struct {
 	Status PodStatus
 }
 
+// Pod information for internal operations
+type PodContext struct {
+	// Pod resources vertical resizing information
+	// +optional
+	ResizeResources *PodResizeResources
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -2845,6 +2849,10 @@ type Pod struct {
 	// to date.
 	// +optional
 	Status PodStatus
+
+	// Pod information for internal operations
+	// +optional
+	Context PodContext
 }
 
 // PodTemplateSpec describes the data a pod should have when created from a template

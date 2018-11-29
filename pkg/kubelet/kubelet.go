@@ -2028,11 +2028,11 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 	var otherActivePods []*v1.Pod
 	isAcceptable := true
 
-	if pod.Spec.ResizeResources.Action != "" {
+	if pod.Context.ResizeResources.Action != "" {
 		var conditionStatus v1.ConditionStatus
 		var reason string
 
-		switch pod.Spec.ResizeResources.Action {
+		switch pod.Context.ResizeResources.Action {
 		case v1.ResizeActionNonePerPolicy:
 			// Scheduler determined that pod reschedule for resizing was blocked by policy, just update pod status and bugout
 			glog.V(4).Infof("Pod '%s' reschedule to resize resources blocked by policy at scheduler. Updating status.", pod.Name)
@@ -2094,7 +2094,7 @@ func (kl *Kubelet) isPodResourceUpdateAcceptable(pod *v1.Pod) bool {
 				Type:               v1.PodResourcesResizeStatus,
 				Status:             conditionStatus,
 				Reason:             reason,
-				Message:            pod.Spec.ResizeResources.ActionVersion,
+				Message:            pod.Context.ResizeResources.ActionVersion,
 				LastTransitionTime: metav1.Now(),
 				LastProbeTime:      metav1.Now(),
 			}
@@ -2122,7 +2122,7 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 		// For non-delete pod updates, check that resource update, if any, is acceptable
 		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
 			// TODO: We may need to do this from HandlePodAdditions as well - investigate kubelet offline case.
-			if pod.DeletionTimestamp == nil && pod.Spec.ResizeResources != nil && !kl.isPodResourceUpdateAcceptable(pod) {
+			if pod.DeletionTimestamp == nil && pod.Context.ResizeResources != nil && !kl.isPodResourceUpdateAcceptable(pod) {
 				continue
 			}
 		}

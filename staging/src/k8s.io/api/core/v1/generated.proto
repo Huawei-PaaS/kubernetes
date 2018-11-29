@@ -2532,6 +2532,13 @@ message PhotonPersistentDiskVolumeSource {
   optional string fsType = 2;
 }
 
+// Pod information for internal operations
+message PodContext {
+  // resizeResources holds the vertical resources resizing related information.
+  // +optional
+  optional PodResizeResources resizeResources = 1;
+}
+
 // Pod is a collection of containers that can run on a host. This resource is created
 // by clients and scheduled onto hosts.
 message Pod {
@@ -2552,6 +2559,10 @@ message Pod {
   // More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#spec-and-status
   // +optional
   optional PodStatus status = 3;
+
+  // Pod information for internal operations
+  // +optional
+  optional PodContext context = 4;
 }
 
 // Pod affinity is a group of inter pod affinity scheduling rules.
@@ -3135,10 +3146,6 @@ message PodSpec {
   // Defaults to InPlacePreferred.
   // +optional
   optional string resizeResourcesPolicy = 29;
-
-  // resizeResources holds the vertical resources resizing related information.
-  // +optional
-  optional PodResizeResources resizeResources = 30;
 }
 
 // PodStatus represents information about the status of a pod. Status may trail the actual

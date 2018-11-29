@@ -245,7 +245,7 @@ func (cache *schedulerCache) addPod(pod *v1.Pod) {
 // this function expects valid pod, and valid, non-empty resizeRequestAnnotation json string
 func getPodResizeRequirements(pod *v1.Pod) (map[string]v1.Container, *Resource, error) {
 	resizeContainersMap := make(map[string]v1.Container)
-	for _, c := range pod.Spec.ResizeResources.Request {
+	for _, c := range pod.Context.ResizeResources.Request {
 		resizeContainersMap[c.Name] = v1.Container{
 							Name:      c.Name,
 							Resources: c.Resources,
@@ -269,7 +269,7 @@ func (cache *schedulerCache) rollbackPodResources(oldPod, newPod *v1.Pod) {
 	currPodState, _ := cache.podStates[podKey]
 	cachedPod := currPodState.pod
 	for i, container := range newPod.Spec.Containers {
-		for _, rollbackResources := range newPod.Spec.ResizeResources.Rollback {
+		for _, rollbackResources := range newPod.Context.ResizeResources.Rollback {
 			if rollbackResources.Name == container.Name {
 				if rollbackResources.Resources.Requests != nil {
 					newPod.Spec.Containers[i].Resources.Requests = rollbackResources.Resources.Requests.DeepCopy()
@@ -318,9 +318,9 @@ func (cache *schedulerCache) setupInPlaceResizeAction(oldPod, newPod *v1.Pod, re
 			}
 		}
 	}
-	newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
-	newPod.Spec.ResizeResources.Action = v1.ResizeActionUpdate
-	newPod.Spec.ResizeResources.Rollback = rollbackResources
+	newPod.Context.ResizeResources.ActionVersion = newPod.ResourceVersion
+	newPod.Context.ResizeResources.Action = v1.ResizeActionUpdate
+	newPod.Context.ResizeResources.Rollback = rollbackResources
 }
 
 func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
@@ -329,17 +329,17 @@ func (cache *schedulerCache) processPodResizeStatus(oldPod, newPod *v1.Pod) {
 		if podCondition.Type != v1.PodResourcesResizeStatus {
 			continue
 		}
-		if podCondition.Message == newPod.Spec.ResizeResources.ActionVersion {
+		if podCondition.Message == newPod.Context.ResizeResources.ActionVersion {
 			// If ResizeStatus shows failure, restore previous resource values
 			if podCondition.Status == v1.ConditionFalse {
-				if newPod.Spec.ResizeResources.Rollback != nil {
+				if newPod.Context.ResizeResources.Rollback != nil {
 					glog.V(4).Infof("Restoring resource values for pod %v due to a failed earlier resizing attempt", oldPod.Name)
 					cache.rollbackPodResources(oldPod, newPod)
 				}
 			}
-			newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
-			newPod.Spec.ResizeResources.Action = v1.ResizeActionUpdateDone
-			newPod.Spec.ResizeResources.Rollback = nil
+			newPod.Context.ResizeResources.ActionVersion = newPod.ResourceVersion
+			newPod.Context.ResizeResources.Action = v1.ResizeActionUpdateDone
+			newPod.Context.ResizeResources.Rollback = nil
 		}
 		break
 	}
@@ -386,17 +386,17 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 
 	cache.processPodResizeStatus(oldPod, newPod)
 
-	if len(newPod.Spec.ResizeResources.Request) != 0 {
+	if len(newPod.Context.ResizeResources.Request) != 0 {
 		if resizeResourcesPolicy == v1.ResizePolicyRestart {
-			newPod.Spec.ResizeResources.Request = nil
-			newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
-			newPod.Spec.ResizeResources.Action = v1.ResizeActionReschedule
+			newPod.Context.ResizeResources.Request = nil
+			newPod.Context.ResizeResources.ActionVersion = newPod.ResourceVersion
+			newPod.Context.ResizeResources.Action = v1.ResizeActionReschedule
 			glog.V(4).Infof("Rescheduling pod %s due to ResizePolicyRestart.", newPod.Name)
 			return nil
 		}
 
 		if resizeContainersMap, podResource, err := getPodResizeRequirements(newPod); err == nil {
-			newPod.Spec.ResizeResources.Request = nil
+			newPod.Context.ResizeResources.Request = nil
 			allocatable := node.AllocatableResource()
 			nodeMilliCPU := node.RequestedResource().MilliCPU
 			nodeMemory := node.RequestedResource().Memory
@@ -407,9 +407,9 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 				return nil
 			} else {
 				// InPlace resizing is not possible, restart if allowed by policy
-				newPod.Spec.ResizeResources.ActionVersion = newPod.ResourceVersion
+				newPod.Context.ResizeResources.ActionVersion = newPod.ResourceVersion
 				if resizeResourcesPolicy == v1.ResizePolicyInPlaceOnly {
-					newPod.Spec.ResizeResources.Action = v1.ResizeActionNonePerPolicy
+					newPod.Context.ResizeResources.Action = v1.ResizeActionNonePerPolicy
 					glog.V(4).Infof("In-place resizing of pod %s on node %s rejected by policy (%s). Allocatable CPU: %d, Memory: %d. Requested: CPU: %d, Memory %d.",
 						newPod.Name, newPod.Spec.NodeName, resizeResourcesPolicy, allocatable.MilliCPU, allocatable.Memory, podResource.MilliCPU, podResource.Memory)
 					return nil
@@ -422,12 +422,12 @@ func (cache *schedulerCache) processPodResourcesScaling(oldPod, newPod *v1.Pod) 
 					}
 					if !ok {
 						// Skip rescheduling at this time as it violates PDB. Let the controller retries handle it.
-						newPod.Spec.ResizeResources.Action = v1.ResizeActionNonePerPDBViolation
+						newPod.Context.ResizeResources.Action = v1.ResizeActionNonePerPDBViolation
 						return nil
 					}
 					glog.V(4).Infof("Rescheduling pod %s as it is within disruption budget.", newPod.Name)
 				}
-				newPod.Spec.ResizeResources.Action = v1.ResizeActionReschedule
+				newPod.Context.ResizeResources.Action = v1.ResizeActionReschedule
 			}
 		} else {
 			glog.Errorf("Pod %s getPodResizeRequirements failed. Error: %v", newPod.Name, err)
@@ -446,7 +446,7 @@ func (cache *schedulerCache) updatePod(oldPod, newPod *v1.Pod) error {
 	// Resize request is valid for running pods
 	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
 		oldPod.Status.Phase == v1.PodRunning && newPod.Status.Phase == v1.PodRunning &&
-		newPod.DeletionTimestamp == nil && newPod.Spec.ResizeResources != nil {
+		newPod.DeletionTimestamp == nil && newPod.Context.ResizeResources != nil {
 		err = cache.processPodResourcesScaling(oldPod, newPod)
 	}
 	cache.addPod(newPod)

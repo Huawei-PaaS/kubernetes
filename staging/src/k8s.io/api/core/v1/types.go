@@ -2920,9 +2920,6 @@ type PodSpec struct {
 	// Defaults to InPlacePreferred.
 	// +optional
 	ResizeResourcesPolicy PodResizeResourcesPolicy `json:"resizeResourcesPolicy,omitempty" protobuf:"bytes,29,opt,name=resizeResourcesPolicy,casttype=PodResizeResourcesPolicy"`
-	// Pod resources vertical resizing information
-	// +optional
-	ResizeResources *PodResizeResources `json:"resizeResources,omitempty" protobuf:"bytes,30,opt,name=resizeResources,casttype=PodResizeResources"`
 }
 
 // HostAlias holds the mapping between IP and hostnames that will be injected as an entry in the
@@ -3126,6 +3123,13 @@ type PodStatusResult struct {
 	Status PodStatus `json:"status,omitempty" protobuf:"bytes,2,opt,name=status"`
 }
 
+// Pod information for internal operations
+type PodContext struct {
+	// Pod resources vertical resizing information
+	// +optional
+	ResizeResources *PodResizeResources `json:"resizeResources,omitempty" protobuf:"bytes,1,opt,name=resizeResources,casttype=PodResizeResources"`
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -3150,6 +3154,10 @@ type Pod struct {
 	// More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#spec-and-status
 	// +optional
 	Status PodStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
+
+	// Pod information for internal operations
+	// +optional
+	Context PodContext `json:"context,omitempty" protobuf:"bytes,4,opt,name=context,casttype=PodContext"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

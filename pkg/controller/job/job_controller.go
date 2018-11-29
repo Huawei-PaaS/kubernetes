@@ -295,7 +295,7 @@ func (jm *JobController) updatePod(old, cur interface{}) {
 	// retry (enqueue) jobs failed from resource update
 	if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && !hasFailedResourceResizeStatus(curPod) {
 		// If resize resources request isn't pending, previous resize attempt failed. queue for retry
-		if len(curPod.Spec.ResizeResources.Request) == 0 && curPod.Spec.ResizeResources.Action == "" {
+		if len(curPod.Context.ResizeResources.Request) == 0 && curPod.Context.ResizeResources.Action == "" {
 			jm.enqueueResourceUpdateForRetry()
 		}
 	}
@@ -502,14 +502,14 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 	for _, pod := range pods {
 		// Skip if a resource update is in flight
-		if pod.Spec.ResizeResources != nil && (len(pod.Spec.ResizeResources.Request) != 0 || pod.Spec.ResizeResources.Action != "") {
+		if pod.Context.ResizeResources != nil && (len(pod.Context.ResizeResources.Request) != 0 || pod.Context.ResizeResources.Action != "") {
 			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
-			if pod.Spec.ResizeResources != nil && pod.Spec.ResizeResources.RequestVersion == j.ResourceVersion {
+			if pod.Context.ResizeResources != nil && pod.Context.ResizeResources.RequestVersion == j.ResourceVersion {
 				// This is not a new request, check if earlier request failed.
 				for _, podCondition := range pod.Status.Conditions {
 					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
@@ -533,11 +533,10 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 						}
 				resourcesRequest = append(resourcesRequest, resReq)
 			}
-			pod.Spec.ResizeResources = &v1.PodResizeResources{
+			pod.Context.ResizeResources = &v1.PodResizeResources{
 								RequestVersion: j.ResourceVersion,
 								Request:        resourcesRequest,
 							}
-
 			updatedPod, err := jm.kubeClient.CoreV1().Pods(pod.Namespace).Update(pod)
 			if err != nil {
 				glog.Errorf("Error updating pod '%s' for resizing resources: %v", pod.Name, err)

@@ -306,14 +306,14 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 			}
 		}
 	}
-	if in.Spec.ResizeResources != nil {
-		for i := range in.Spec.ResizeResources.Request {
-			a := &in.Spec.ResizeResources.Request[i]
+	if in.Context.ResizeResources != nil {
+		for i := range in.Context.ResizeResources.Request {
+			a := &in.Context.ResizeResources.Request[i]
 			SetDefaults_ResourceList(&a.Resources.Limits)
 			SetDefaults_ResourceList(&a.Resources.Requests)
 		}
-		for i := range in.Spec.ResizeResources.Rollback {
-			a := &in.Spec.ResizeResources.Rollback[i]
+		for i := range in.Context.ResizeResources.Rollback {
+			a := &in.Context.ResizeResources.Rollback[i]
 			SetDefaults_ResourceList(&a.Resources.Limits)
 			SetDefaults_ResourceList(&a.Resources.Requests)
 		}
@@ -464,18 +464,6 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 			}
 		}
 	}
-	if in.Template.Spec.ResizeResources != nil {
-		for i := range in.Template.Spec.ResizeResources.Request {
-			a := &in.Template.Spec.ResizeResources.Request[i]
-			SetDefaults_ResourceList(&a.Resources.Limits)
-			SetDefaults_ResourceList(&a.Resources.Requests)
-		}
-		for i := range in.Template.Spec.ResizeResources.Rollback {
-			a := &in.Template.Spec.ResizeResources.Rollback[i]
-			SetDefaults_ResourceList(&a.Resources.Limits)
-			SetDefaults_ResourceList(&a.Resources.Requests)
-		}
-	}
 }
 
 func SetObjectDefaults_PodTemplateList(in *v1.PodTemplateList) {
@@ -622,18 +610,6 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 						SetDefaults_HTTPGetAction(a.Lifecycle.PreStop.HTTPGet)
 					}
 				}
-			}
-		}
-		if in.Spec.Template.Spec.ResizeResources != nil {
-			for i := range in.Spec.Template.Spec.ResizeResources.Request {
-				a := &in.Spec.Template.Spec.ResizeResources.Request[i]
-				SetDefaults_ResourceList(&a.Resources.Limits)
-				SetDefaults_ResourceList(&a.Resources.Requests)
-			}
-			for i := range in.Spec.Template.Spec.ResizeResources.Rollback {
-				a := &in.Spec.Template.Spec.ResizeResources.Rollback[i]
-				SetDefaults_ResourceList(&a.Resources.Limits)
-				SetDefaults_ResourceList(&a.Resources.Requests)
 			}
 		}
 	}
