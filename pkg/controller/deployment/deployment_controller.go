@@ -27,6 +27,7 @@ import (
 
 	"github.com/golang/glog"
 
+	"encoding/json"
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
@@ -47,6 +49,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/controller/deployment/util"
+	"k8s.io/kubernetes/pkg/features"
+	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/util/metrics"
 )
 
@@ -69,6 +73,7 @@ type DeploymentController struct {
 	rsControl     controller.RSControlInterface
 	client        clientset.Interface
 	eventRecorder record.EventRecorder
+	podControl    controller.PodControlInterface
 
 	// To allow injection of syncDeployment for testing.
 	syncHandler func(dKey string) error
@@ -94,6 +99,9 @@ type DeploymentController struct {
 
 	// Deployments that need to be synced
 	queue workqueue.RateLimitingInterface
+
+	// A list of deployments to be re-sync'd for resource update
+	deploymentsToReSyncResource map[types.UID]*apps.Deployment
 }
 
 // NewDeploymentController creates a new DeploymentController.
@@ -115,6 +123,11 @@ func NewDeploymentController(dInformer appsinformers.DeploymentInformer, rsInfor
 	dc.rsControl = controller.RealRSControl{
 		KubeClient: client,
 		Recorder:   dc.eventRecorder,
+	}
+
+	dc.podControl = controller.RealPodControl{
+		KubeClient: client,
+		Recorder:   eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "deployment-controller"}),
 	}
 
 	dInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -141,6 +154,7 @@ func NewDeploymentController(dInformer appsinformers.DeploymentInformer, rsInfor
 	dc.dListerSynced = dInformer.Informer().HasSynced
 	dc.rsListerSynced = rsInformer.Informer().HasSynced
 	dc.podListerSynced = podInformer.Informer().HasSynced
+	dc.deploymentsToReSyncResource = make(map[types.UID]*apps.Deployment)
 	return dc, nil
 }
 
@@ -555,6 +569,84 @@ func (dc *DeploymentController) getPodMapForDeployment(d *apps.Deployment, rsLis
 	return podMap, nil
 }
 
+func (dc *DeploymentController) enqueueResourceUpdateForRetry() {
+	for key, deploymentToRetry := range dc.deploymentsToReSyncResource {
+		//make sure deployment still alive
+		storedDeployment, err := dc.dLister.Deployments(deploymentToRetry.Namespace).Get(deploymentToRetry.Name)
+		if err != nil || storedDeployment.UID != deploymentToRetry.UID {
+			delete(dc.deploymentsToReSyncResource, key)
+			glog.V(4).Infof("Skipping retry resource update for a non-existing deployment %s", deploymentToRetry.Name)
+			continue
+		}
+		dc.enqueueDeployment(deploymentToRetry)
+		glog.V(4).Infof("Added deployment %s to retry resoruce update", deploymentToRetry.Name)
+	}
+}
+
+func (dc *DeploymentController) patchDeploymentResource(d *apps.Deployment) (bool, error) {
+	selector, err := metav1.LabelSelectorAsSelector(d.Spec.Selector)
+	if err != nil {
+		return false, err
+	}
+	pods, err := dc.podLister.Pods(d.Namespace).List(selector)
+	if err != nil {
+		return false, err
+	}
+
+	cm := controller.NewPodControllerRefManager(dc.podControl, d, nil, controllerKind, nil)
+
+	cMap := make(map[string]*v1.Container)
+	for i, container := range d.Spec.Template.Spec.Containers {
+		cMap[container.Name] = &(d.Spec.Template.Spec.Containers[i])
+	}
+
+	hasResourceUpdate := false
+
+	for _, pod := range pods {
+		// Skip if a resource update is in flight
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
+			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			continue
+		}
+		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			continue
+		}
+
+		resourceUpdates := controller.MergeResourceChanges(pod, cMap)
+		if len(resourceUpdates) > 0 {
+			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == d.ResourceVersion {
+
+				// This is not a new request, check if earlier request failed.
+				for _, podCondition := range pod.Status.Conditions {
+					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
+						// queue this deployment for resource update retry (when there's pod update and/or deletion)
+						if _, ok := dc.deploymentsToReSyncResource[d.UID]; !ok {
+							dc.deploymentsToReSyncResource[d.UID] = d
+							glog.V(4).Infof("Added deployment %s to retry resoruce queue", d.Name)
+							return true, nil
+						}
+
+						delete(dc.deploymentsToReSyncResource, d.UID)
+						glog.V(4).Infof("Retrying resource resizing for pod %s by deployment %s version %s.", pod.Name, d.Name, d.ResourceVersion)
+					}
+				}
+			}
+
+			anno := make(map[string]string)
+			jsonStr, _ := json.Marshal(resourceUpdates)
+			anno[schedulerapi.AnnotationResizeResourcesRequestVer] = d.ResourceVersion
+			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
+
+			cm.PatchPodResourceAnnotation(pod, anno)
+			glog.V(6).Infof("Adding resource update annotation %v to pod %s, request version is %v", anno, pod.Name, d.ResourceVersion)
+			hasResourceUpdate = true
+		}
+	}
+
+	return hasResourceUpdate, nil
+}
+
 // syncDeployment will sync the deployment with the given key.
 // This function is not meant to be invoked concurrently with the same key.
 func (dc *DeploymentController) syncDeployment(key string) error {
@@ -571,6 +663,10 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	deployment, err := dc.dLister.Deployments(namespace).Get(name)
 	if errors.IsNotFound(err) {
 		glog.V(2).Infof("Deployment %v has been deleted", key)
+
+		// retry failed resource update
+		dc.enqueueResourceUpdateForRetry()
+
 		return nil
 	}
 	if err != nil {
@@ -597,6 +693,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	if err != nil {
 		return err
 	}
+
 	// List all Pods owned by this Deployment, grouped by their ReplicaSet.
 	// Current uses of the podMap are:
 	//
@@ -635,6 +732,15 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	}
 	if scalingEvent {
 		return dc.sync(d, rsList, podMap)
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		hasResourceUpdate, _ := dc.patchDeploymentResource(d)
+
+		// return early to prevent creating new replicas when doing resource update
+		if hasResourceUpdate {
+			return nil
+		}
 	}
 
 	switch d.Spec.Strategy.Type {
