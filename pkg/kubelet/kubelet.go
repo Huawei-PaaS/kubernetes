@@ -2021,6 +2021,16 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 		mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
 		kl.dispatchWork(pod, kubetypes.SyncPodCreate, mirrorPod, start)
 		kl.probeManager.AddPod(pod)
+
+		// Handle resources resize request if one is in progress
+		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && pod.DeletionTimestamp == nil {
+			if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
+				glog.V(2).Infof("A resource update is in progress for pod %s.", pod.Name)
+				if kl.isPodResourceUpdateAcceptable(pod) {
+					kl.podManager.UpdatePod(pod)
+				}
+			}
+		}
 	}
 }
 

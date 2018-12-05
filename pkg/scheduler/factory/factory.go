@@ -625,6 +625,18 @@ func (c *configFactory) addPodToCache(obj interface{}) {
 
 	// NOTE: Updating equivalence cache of addPodToCache has been
 	// handled optimistically in: pkg/scheduler/scheduler.go#assume()
+
+	// If a resources resize request is in progress, handle it by calling updatePodInCache
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) &&
+		pod.Status.Phase == v1.PodRunning &&
+		pod.DeletionTimestamp == nil {
+		_, request := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]
+		_, action := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]
+		if request || action {
+			glog.V(2).Infof("A resource update is in progress for pod %s.", pod.Name)
+			c.updatePodInCache(pod, pod)
+		}
+	}
 }
 
 func (c *configFactory) processPodResizeAction(oldPod, newPod *v1.Pod, resizeAction string) {
