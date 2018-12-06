@@ -19,6 +19,12 @@ package job
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"reflect"
+	"sort"
+	"sync"
+	"time"
+
 	batch "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -43,11 +49,6 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/util/metrics"
-	"math"
-	"reflect"
-	"sort"
-	"sync"
-	"time"
 
 	"github.com/golang/glog"
 )
@@ -513,18 +514,17 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 	for _, pod := range pods {
 		// Skip if a resource update is in flight
 		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
-			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			glog.V(4).Infof("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
-			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			glog.V(4).Infof("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 
 		resourceUpdates := mergeResourceChanges(pod, cMap)
 		if len(resourceUpdates) > 0 {
-			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
-
+			if requestVer, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
 				// This is not a new request, check if earlier request failed.
 				for _, podCondition := range pod.Status.Conditions {
 					if podCondition.Type == v1.PodResourcesResizeStatus && podCondition.Status == v1.ConditionFalse {
@@ -536,7 +536,6 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 
 							return nil
 						}
-
 						delete(jm.jobsToReSyncResource, j.UID)
 						glog.V(4).Infof("Retrying resource resizing for pod %s by job %s version %s.", pod.Name, j.Name, j.ResourceVersion)
 					}
