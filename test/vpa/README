@@ -1,0 +1,9 @@
+1. deploy the example deployment:
+
+kubectl create -f sd_deployment.yaml
+
+2. change the resources of a container: 
+
+./patch_resources.sh dp-test sd2 51 51
+
+This will update the request and limit of the memory of container 'sd2' in deployment 'dp-test' to 51G and 51G. Pod should remain running the whole time without restart.
