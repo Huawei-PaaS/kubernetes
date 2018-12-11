@@ -143,6 +143,7 @@ func NewDeploymentController(dInformer appsinformers.DeploymentInformer, rsInfor
 	})
 	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		DeleteFunc: dc.deletePod,
+		UpdateFunc: dc.updatePod,
 	})
 
 	dc.syncHandler = dc.syncDeployment
@@ -347,6 +348,51 @@ func (dc *DeploymentController) deleteReplicaSet(obj interface{}) {
 	dc.enqueueDeployment(d)
 }
 
+func hasFailedResourceResizeStatus(pod *v1.Pod) bool {
+	for _, podCondition := range pod.Status.Conditions {
+		if podCondition.Type == v1.PodResourcesResizeStatus &&
+			podCondition.Status == v1.ConditionFalse {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (dc *DeploymentController) updatePod(old, cur interface{}) {
+	curPod := cur.(*v1.Pod)
+	oldPod := old.(*v1.Pod)
+
+	// retry (enqueue) jobs failed from resource update
+	// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
+	if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
+		// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
+		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
+			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
+				resourceFailure := hasFailedResourceResizeStatus(curPod)
+				if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && resourceFailure { // failure posted by kubelet before scheduler revert resource
+
+					curDeployment := dc.getDeploymentForPod(curPod)
+					inRetryQueue := false
+					for _, deploymentToRetry := range dc.deploymentsToReSyncResource {
+						if deploymentToRetry == curDeployment {
+							inRetryQueue = true
+							break
+						}
+					}
+					if !inRetryQueue {
+						dc.deploymentsToReSyncResource[curDeployment.UID] = curDeployment
+						glog.V(4).Infof("Added deployment %s to retry resoruce queue", curDeployment.Name)
+						return
+					}
+				} else if resourceFailure {
+					dc.enqueueResourceUpdateForRetry()
+				}
+			}
+		}
+	}
+}
+
 // deletePod will enqueue a Recreate Deployment once all of its pods have stopped running.
 func (dc *DeploymentController) deletePod(obj interface{}) {
 	pod, ok := obj.(*v1.Pod)
@@ -368,6 +414,10 @@ func (dc *DeploymentController) deletePod(obj interface{}) {
 		}
 	}
 	glog.V(4).Infof("Pod %s deleted.", pod.Name)
+
+	// retry (enqueue) jobs failed from resource update
+	dc.enqueueResourceUpdateForRetry()
+
 	if d := dc.getDeploymentForPod(pod); d != nil && d.Spec.Strategy.Type == apps.RecreateDeploymentStrategyType {
 		// Sync if this Deployment now has no more Pods.
 		rsList, err := util.ListReplicaSets(d, util.RsListFromClient(dc.client.AppsV1()))
