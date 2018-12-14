@@ -295,14 +295,16 @@ func (jm *JobController) updatePod(old, cur interface{}) {
 	}
 
 	// retry (enqueue) jobs failed from resource update
-	if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && !hasFailedResourceResizeStatus(curPod) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && hasFailedResourceResizeStatus(curPod) {
 
-		// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
-		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
-			// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
-			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
-				if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
-					jm.enqueueResourceUpdateForRetry()
+			// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
+			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
+				// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
+				if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
+					if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
+						jm.enqueueResourceUpdateForRetry()
+					}
 				}
 			}
 		}
@@ -365,7 +367,9 @@ func (jm *JobController) deletePod(obj interface{}) {
 	}
 
 	// retry (enqueue) jobs failed from resource update
-	jm.enqueueResourceUpdateForRetry()
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		jm.enqueueResourceUpdateForRetry()
+	}
 
 	jm.expectations.DeletionObserved(jobKey)
 	jm.enqueueController(job, true)
@@ -471,7 +475,7 @@ func (jm *JobController) patchJobResource(j *batch.Job, pods []*v1.Pod) error {
 			continue
 		}
 
-		resourceUpdates := controller.MergeResourceChanges(pod, cMap)
+		resourceUpdates := controller.GetUpdatedPodResources(pod, cMap)
 		if len(resourceUpdates) > 0 {
 			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == j.ResourceVersion {
 
@@ -560,7 +564,9 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 			jm.expectations.DeleteExpectations(key)
 
 			// retry failed resource update
-			jm.enqueueResourceUpdateForRetry()
+			if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+				jm.enqueueResourceUpdateForRetry()
+			}
 
 			return true, nil
 		}

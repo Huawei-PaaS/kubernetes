@@ -363,30 +363,32 @@ func (dc *DeploymentController) updatePod(old, cur interface{}) {
 	curPod := cur.(*v1.Pod)
 	oldPod := old.(*v1.Pod)
 
-	// retry (enqueue) jobs failed from resource update
-	// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
-	if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
-		// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
-		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
-			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
-				resourceFailure := hasFailedResourceResizeStatus(curPod)
-				if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && resourceFailure { // failure posted by kubelet before scheduler revert resource
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		// retry (enqueue) jobs failed from resource update
+		// non-existing AnnotationResizeResourcesRequest indicates a non-inflight resource request
+		if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; !ok {
+			// non-existing AnnotationResizeResourcesAction and AnnotationResizeResourcesActionVer indicates a succeeded resource update
+			if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; !ok {
+				if _, ok := curPod.Annotations[schedulerapi.AnnotationResizeResourcesActionVer]; !ok {
+					resourceFailure := hasFailedResourceResizeStatus(curPod)
+					if !reflect.DeepEqual(curPod.Spec.Containers, oldPod.Spec.Containers) && resourceFailure { // failure posted by kubelet before scheduler revert resource
 
-					curDeployment := dc.getDeploymentForPod(curPod)
-					inRetryQueue := false
-					for _, deploymentToRetry := range dc.deploymentsToReSyncResource {
-						if deploymentToRetry == curDeployment {
-							inRetryQueue = true
-							break
+						curDeployment := dc.getDeploymentForPod(curPod)
+						inRetryQueue := false
+						for _, deploymentToRetry := range dc.deploymentsToReSyncResource {
+							if deploymentToRetry == curDeployment {
+								inRetryQueue = true
+								break
+							}
 						}
+						if !inRetryQueue {
+							dc.deploymentsToReSyncResource[curDeployment.UID] = curDeployment
+							glog.V(4).Infof("Added deployment %s to retry resoruce queue", curDeployment.Name)
+							return
+						}
+					} else if resourceFailure {
+						dc.enqueueResourceUpdateForRetry()
 					}
-					if !inRetryQueue {
-						dc.deploymentsToReSyncResource[curDeployment.UID] = curDeployment
-						glog.V(4).Infof("Added deployment %s to retry resoruce queue", curDeployment.Name)
-						return
-					}
-				} else if resourceFailure {
-					dc.enqueueResourceUpdateForRetry()
 				}
 			}
 		}
@@ -416,7 +418,9 @@ func (dc *DeploymentController) deletePod(obj interface{}) {
 	glog.V(4).Infof("Pod %s deleted.", pod.Name)
 
 	// retry (enqueue) jobs failed from resource update
-	dc.enqueueResourceUpdateForRetry()
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+		dc.enqueueResourceUpdateForRetry()
+	}
 
 	if d := dc.getDeploymentForPod(pod); d != nil && d.Spec.Strategy.Type == apps.RecreateDeploymentStrategyType {
 		// Sync if this Deployment now has no more Pods.
@@ -655,15 +659,15 @@ func (dc *DeploymentController) patchDeploymentResource(d *apps.Deployment) (boo
 	for _, pod := range pods {
 		// Skip if a resource update is in flight
 		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesRequest]; ok {
-			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			glog.V(2).Infof("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 		if _, ok := pod.Annotations[schedulerapi.AnnotationResizeResourcesAction]; ok {
-			glog.Warningf("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
+			glog.V(2).Infof("A resource update is in progress for pod %s. Skipping pod.", pod.Name)
 			continue
 		}
 
-		resourceUpdates := controller.MergeResourceChanges(pod, cMap)
+		resourceUpdates := controller.GetUpdatedPodResources(pod, cMap)
 		if len(resourceUpdates) > 0 {
 			if requestVer, ok := pod.ObjectMeta.Annotations[schedulerapi.AnnotationResizeResourcesRequestVer]; ok && requestVer == d.ResourceVersion {
 
@@ -714,8 +718,10 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	if errors.IsNotFound(err) {
 		glog.V(2).Infof("Deployment %v has been deleted", key)
 
-		// retry failed resource update
-		dc.enqueueResourceUpdateForRetry()
+		if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+			// retry failed resource update
+			dc.enqueueResourceUpdateForRetry()
+		}
 
 		return nil
 	}

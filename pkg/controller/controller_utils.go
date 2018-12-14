@@ -1049,7 +1049,7 @@ func ComputeHash(template *v1.PodTemplateSpec, collisionCount *int32) uint32 {
 	return podTemplateSpecHasher.Sum32()
 }
 
-func MergeResourceChanges(pod *v1.Pod, cMap map[string]*v1.Container) []v1.Container {
+func GetUpdatedPodResources(pod *v1.Pod, cMap map[string]*v1.Container) []v1.Container {
 	var resourceUpdates []v1.Container
 
 	// add annotation to pod if request and/or limit from job/deployment spec is different
