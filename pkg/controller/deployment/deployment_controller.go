@@ -691,10 +691,15 @@ func (dc *DeploymentController) patchDeploymentResource(d *apps.Deployment) (boo
 			jsonStr, _ := json.Marshal(resourceUpdates)
 			anno[schedulerapi.AnnotationResizeResourcesRequestVer] = d.ResourceVersion
 			anno[schedulerapi.AnnotationResizeResourcesRequest] = string(jsonStr)
-
-			cm.PatchPodResourceAnnotation(pod, anno)
-			glog.V(6).Infof("Adding resource update annotation %v to pod %s, request version is %v", anno, pod.Name, d.ResourceVersion)
 			hasResourceUpdate = true
+
+			err := cm.PatchPodResourceAnnotation(pod, anno)
+			if err != nil {
+				glog.Errorf("Failed to added resource update annotation %v to pod %s, request version is %v", anno, pod.Name, d.ResourceVersion)
+				return hasResourceUpdate, err
+			}
+
+			glog.V(6).Infof("Added resource update annotation %v to pod %s, request version is %v", anno, pod.Name, d.ResourceVersion)
 		}
 	}
 
@@ -791,7 +796,10 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	}
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
-		hasResourceUpdate, _ := dc.patchDeploymentResource(d)
+		hasResourceUpdate, err := dc.patchDeploymentResource(d)
+		if err != nil {
+			return err
+		}
 
 		// return early to prevent creating new replicas when doing resource update
 		if hasResourceUpdate {
