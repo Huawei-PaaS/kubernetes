@@ -23,11 +23,16 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	utilfeaturetesting "k8s.io/apiserver/pkg/util/feature/testing"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 func TestValidateDaemonSetStatusUpdate(t *testing.T) {
@@ -1352,6 +1357,83 @@ func TestValidateDeploymentStatus(t *testing.T) {
 			t.Errorf("%s: expected error: %t, got error: %t\nerrors: %s", test.name, test.expectedErr, hasErr, errString)
 		}
 	}
+}
+
+func getPodTemplateSpecForResourceUpdate(request string, limit string, selector *metav1.LabelSelector) api.PodTemplateSpec {
+
+	rs := new(api.ResourceRequirements)
+	rs.Requests = make(api.ResourceList)
+	rs.Limits = make(api.ResourceList)
+
+	// BURSTABLE QOS, use "memory" to change to GUARENTEED
+	rs.Requests["memory"], _ = resource.ParseQuantity(request)
+	rs.Limits["memory"], _ = resource.ParseQuantity(limit)
+	rs.Requests["cpu"], _ = resource.ParseQuantity("4")
+	rs.Limits["cpu"], _ = resource.ParseQuantity("4")
+
+	return api.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: selector.MatchLabels,
+		},
+		Spec: api.PodSpec{
+			RestartPolicy: api.RestartPolicyOnFailure,
+			DNSPolicy:     api.DNSClusterFirst,
+			Containers:    []api.Container{{Name: "abc", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: api.TerminationMessageReadFile, Resources: *rs}},
+		},
+	}
+}
+
+func getValidGeneratedSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchLabels: map[string]string{"controller-uid": "1a2b3c", "demployment-name": "mydeployment"},
+	}
+}
+
+func TestValidationDeploymentTemplateResourceUpdate(t *testing.T) {
+	validGeneratedSelector := getValidGeneratedSelector()
+	oldSpec := getPodTemplateSpecForResourceUpdate("5Gi", "10Gi", validGeneratedSelector)
+	newSpec := getPodTemplateSpecForResourceUpdate("6Gi", "11Gi", validGeneratedSelector)
+	newDeploymentSpec := extensions.DeploymentSpec{
+		Selector: validGeneratedSelector,
+		Template: newSpec,
+	}
+
+	utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.VerticalScaling, true)
+
+	cases := map[string]extensions.Deployment{
+		"update resource": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "mydeployment",
+				Namespace: metav1.NamespaceDefault,
+				UID:       types.UID("1a2b3c"),
+			},
+			Spec: extensions.DeploymentSpec{
+				Selector: validGeneratedSelector,
+				Template: oldSpec,
+			},
+		},
+	}
+
+	for k, v := range cases {
+		if errs := ValidateDeploymentSpecUpdate(newDeploymentSpec, v.Spec, field.NewPath("spec")); len(errs) != 0 {
+			t.Errorf("expected success for %s: %v", k, errs)
+		}
+	}
+
+	// change qos
+	newQOSSpec := getPodTemplateSpecForResourceUpdate("11Gi", "11Gi", validGeneratedSelector) //GUARENTEED QOS
+	newQOSDeploymentSpec := extensions.DeploymentSpec{
+		Selector: validGeneratedSelector,
+		Template: newQOSSpec,
+	}
+	for k, v := range cases {
+		if errs := ValidateDeploymentSpecUpdate(newQOSDeploymentSpec, v.Spec, field.NewPath("spec")); len(errs) == 0 {
+			t.Errorf("expected failure for %s: %v", k, errs)
+		}
+	}
+
+	// unset feature gate for other tests
+	utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.VerticalScaling, false)
 }
 
 func TestValidateDeploymentStatusUpdate(t *testing.T) {

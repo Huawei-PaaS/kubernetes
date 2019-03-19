@@ -1,0 +1,35 @@
+apiVersion: extensions/v1beta1 
+kind: Deployment 
+metadata:
+  name: dp-test
+spec:
+  replicas: 1 
+  template:
+    metadata:
+      labels:
+        app: dp-test
+      annotations:
+        oomKillDisable: "true"
+        scheduler.alpha.kubernetes.io/resize-resources-policy: "InPlaceOnly"
+    spec:
+      containers:
+      - name: sd1 
+        image: sd:latest
+        imagePullPolicy: "IfNotPresent"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "5Gi"
+          limits:
+            cpu: "4"
+            memory: "5Gi"
+      - name: sd2 
+        image: sd:latest
+        imagePullPolicy: "IfNotPresent"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"

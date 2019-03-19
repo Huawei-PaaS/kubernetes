@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1046,4 +1047,54 @@ func ComputeHash(template *v1.PodTemplateSpec, collisionCount *int32) uint32 {
 	}
 
 	return podTemplateSpecHasher.Sum32()
+}
+
+func GetUpdatedPodResources(pod *v1.Pod, cMap map[string]*v1.Container) []v1.Container {
+	var resourceUpdates []v1.Container
+
+	// add annotation to pod if request and/or limit from job/deployment spec is different
+	for _, podContainer := range pod.Spec.Containers {
+		hasUpdate := false
+		var patch v1.Container
+		specContainerResource := cMap[podContainer.Name].Resources
+
+		// update request from job/deployment spec
+		if !reflect.DeepEqual(podContainer.Resources.Requests, specContainerResource.Requests) {
+			if podContainer.Resources.Requests == nil {
+				patch.Resources.Requests = specContainerResource.Requests.DeepCopy()
+			} else {
+				patch.Resources.Requests = make(v1.ResourceList)
+				for name, val := range specContainerResource.Requests {
+					if podVal, exists := podContainer.Resources.Requests[name]; !exists ||
+						!reflect.DeepEqual(podVal, val) {
+						patch.Resources.Requests[name] = val
+					}
+				}
+			}
+			hasUpdate = true
+		}
+
+		// update limit from job/deployment spec
+		if !reflect.DeepEqual(podContainer.Resources.Limits, specContainerResource.Limits) {
+			if podContainer.Resources.Limits == nil {
+				patch.Resources.Limits = specContainerResource.Limits.DeepCopy()
+			} else {
+
+				patch.Resources.Limits = make(v1.ResourceList)
+				for name, val := range specContainerResource.Limits {
+					if podVal, exists := podContainer.Resources.Limits[name]; !exists ||
+						!reflect.DeepEqual(podVal, val) {
+						patch.Resources.Limits[name] = val
+					}
+				}
+			}
+			hasUpdate = true
+		}
+
+		if hasUpdate {
+			patch.Name = podContainer.Name
+			resourceUpdates = append(resourceUpdates, patch)
+		}
+	}
+	return resourceUpdates
 }

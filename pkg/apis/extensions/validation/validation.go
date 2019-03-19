@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/core/helper/qos"
 	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/kubernetes/pkg/apis/extensions"
 )
@@ -327,6 +328,33 @@ func ValidateDeploymentStatus(status *extensions.DeploymentStatus, fldPath *fiel
 func ValidateDeploymentUpdate(update, old *extensions.Deployment) field.ErrorList {
 	allErrs := apivalidation.ValidateObjectMetaUpdate(&update.ObjectMeta, &old.ObjectMeta, field.NewPath("metadata"))
 	allErrs = append(allErrs, ValidateDeploymentSpec(&update.Spec, field.NewPath("spec"))...)
+	allErrs = append(allErrs, ValidateDeploymentSpecUpdate(update.Spec, old.Spec, field.NewPath("spec"))...)
+	return allErrs
+}
+
+func ValidateDeploymentSpecUpdate(spec, oldSpec extensions.DeploymentSpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	allErrs = append(allErrs, ValidateDeploymentQOSImmutable(spec, oldSpec, fldPath.Child("template"))...)
+	return allErrs
+}
+
+func ValidateDeploymentQOSImmutable(spec, oldSpec extensions.DeploymentSpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	oldPod := api.Pod{
+		Spec: oldSpec.Template.Spec,
+	}
+	oldQOS := qos.GetPodQOS(&oldPod)
+
+	newPod := api.Pod{
+		Spec: spec.Template.Spec,
+	}
+	newQOS := qos.GetPodQOS(&newPod)
+
+	if newQOS != oldQOS {
+		allErrs = append(allErrs, field.Invalid(fldPath, newQOS, "Pod QOS is immutable"))
+	}
+
 	return allErrs
 }
 

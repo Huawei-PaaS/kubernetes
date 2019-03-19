@@ -1,0 +1,25 @@
+apiVersion: extensions/v1beta1 
+kind: Deployment 
+metadata:
+  name: e2e-test
+spec:
+  replicas: 1 
+  template:
+    metadata:
+      labels:
+        app: dp-test
+      annotations:
+        oomKillDisable: "true"
+        scheduler.alpha.kubernetes.io/resize-resources-policy: "InPlacePreferred"
+    spec:
+      containers:
+      - name: sd1 
+        image: redis:latest
+        imagePullPolicy: "IfNotPresent"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "1Gi"
+          limits:
+            cpu: "4"
+            memory: "1Gi"
