@@ -40,7 +40,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
-	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/types"
@@ -632,25 +631,36 @@ func (m *kubeGenericRuntimeManager) updateContainerResources(pod *v1.Pod, contai
 		pod, containerSpec = restoredPod, restoredContainer
 	}
 
-	var containerResources runtimeapi.LinuxContainerResources
+	memoryLimit := int64(0)
+	cpuShares := int64(0)
 	cpuRequest := int64(0)
 	cpuLimit := int64(0)
-	memoryLimit := int64(0)
-	if cpuRequests, found := resources.Requests[v1.ResourceCPU]; found {
-		cpuRequest = cpuRequests.Value()
-	}
-	if cpuLimits, found := resources.Limits[v1.ResourceCPU]; found {
-		cpuLimit = cpuLimits.Value()
-	}
+	var containerResources runtimeapi.LinuxContainerResources
+
 	if memoryLimits, found := resources.Limits[v1.ResourceMemory]; found {
 		memoryLimit = memoryLimits.Value()
 	}
-
-	containerResources.CpuShares = int64(cm.MilliCPUToShares(cpuRequest * 1000))
-	cpuQuota, cpuPeriod := cm.MilliCPUToQuota(cpuLimit * 1000)
-	containerResources.CpuPeriod = int64(cpuPeriod)
-	containerResources.CpuQuota = cpuQuota
 	containerResources.MemoryLimitInBytes = memoryLimit
+
+	if cpuRequests, found := resources.Requests[v1.ResourceCPU]; found {
+		cpuRequest = cpuRequests.MilliValue()
+	}
+	if cpuLimits, found := resources.Limits[v1.ResourceCPU]; found {
+		cpuLimit = cpuLimits.MilliValue()
+	}
+
+	if cpuRequest == 0 && cpuLimit != 0 {
+		cpuShares = milliCPUToShares(cpuLimit)
+	} else {
+		cpuShares = milliCPUToShares(cpuRequest)
+	}
+	containerResources.CpuShares = cpuShares
+
+	if m.cpuCFSQuota {
+		cpuQuota, cpuPeriod := milliCPUToQuota(cpuLimit)
+		containerResources.CpuPeriod = int64(cpuPeriod)
+		containerResources.CpuQuota = cpuQuota
+	}
 
 	err := m.runtimeService.UpdateContainerResources(containerID.ID, &containerResources)
 	if err != nil {
