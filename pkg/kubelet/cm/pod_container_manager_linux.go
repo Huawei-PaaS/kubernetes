@@ -76,6 +76,60 @@ func (m *podContainerManagerImpl) Exists(pod *v1.Pod) bool {
 // If the pod level container doesn't already exist it is created.
 func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 	podContainerName, _ := m.GetPodContainerName(pod)
+	// check if container already exist
+	alreadyExists := m.Exists(pod)
+	if !alreadyExists {
+		// Create the pod container
+		containerConfig := &CgroupConfig{
+			Name:               podContainerName,
+			ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits),
+		}
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
+			containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
+		}
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.VerticalScaling) {
+			// parse oomKillDisable flag
+			oomKillDisable := pod.ObjectMeta.Annotations[oomKillDisableAnnotation]
+			containerConfig.ResourceParameters.OomKillDisable = false
+			if oomKillDisable == "true" {
+				containerConfig.ResourceParameters.OomKillDisable = true
+			}
+		}
+		if err := m.cgroupManager.Create(containerConfig); err != nil {
+			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
+		}
+	}
+	// Apply appropriate resource limits on the pod container
+	// Top level qos containers limits are not updated
+	// until we figure how to maintain the desired state in the kubelet.
+	// Because maintaining the desired state is difficult without checkpointing.
+	if err := m.applyLimits(pod); err != nil {
+		return fmt.Errorf("failed to apply resource limits on container for %v : %v", podContainerName, err)
+	}
+	return nil
+}
+
+func (m *podContainerManagerImpl) GetPodCgroupCpuLimit(pod *v1.Pod) (int64, uint64, uint64, error) {
+	podContainerName, _ := m.GetPodContainerName(pod)
+	stats, err := m.cgroupManager.GetCgroupStats(podContainerName)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return stats.CpuStats.CpuLimits.CpuQuota, stats.CpuStats.CpuLimits.CpuPeriod, stats.CpuStats.CpuLimits.CpuShares, nil
+}
+
+func (m *podContainerManagerImpl) GetPodCgroupMemoryLimit(pod *v1.Pod) (uint64, error) {
+	podContainerName, _ := m.GetPodContainerName(pod)
+	stats, err := m.cgroupManager.GetCgroupStats(podContainerName)
+	if err != nil {
+		return 0, err
+	}
+	return stats.MemoryStats.Usage.Limit, nil
+}
+
+func (m *podContainerManagerImpl) Update(pod *v1.Pod, skipSubsystems []string) error {
+	podContainerName, _ := m.GetPodContainerName(pod)
+
 	containerConfig := &CgroupConfig{
 		Name:               podContainerName,
 		ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits),
@@ -83,7 +137,6 @@ func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportPodPidsLimit) && m.podPidsLimit > 0 {
 		containerConfig.ResourceParameters.PodPidsLimit = &m.podPidsLimit
 	}
-
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.VerticalScaling) {
 		// parse oomKillDisable flag
 		oomKillDisable := pod.ObjectMeta.Annotations[oomKillDisableAnnotation]
@@ -92,25 +145,9 @@ func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 			containerConfig.ResourceParameters.OomKillDisable = true
 		}
 	}
-
-	// check if container already exist
-	alreadyExists := m.Exists(pod)
-	if !alreadyExists {
-		// Create the pod container cgroup
-		if err := m.cgroupManager.Create(containerConfig); err != nil {
-			return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
-		}
-	} else if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.VerticalScaling) {
-		// Update the pod container cgroup
-		if err := m.cgroupManager.Update(containerConfig); err != nil {
-			return fmt.Errorf("failed to update container for %v : %v", podContainerName, err)
-		}
+	if err := m.cgroupManager.Update(containerConfig, skipSubsystems); err != nil {
+		return fmt.Errorf("failed to create container for %v : %v", podContainerName, err)
 	}
-
-	// Apply appropriate resource limits on the pod container
-	// Top level qos containers limits are not updated
-	// until we figure how to maintain the desired state in the kubelet.
-	// Because maintaining the desired state is difficult without checkpointing.
 	if err := m.applyLimits(pod); err != nil {
 		return fmt.Errorf("failed to apply resource limits on container for %v : %v", podContainerName, err)
 	}
@@ -317,6 +354,18 @@ func (m *podContainerManagerNoop) EnsureExists(_ *v1.Pod) error {
 
 func (m *podContainerManagerNoop) GetPodContainerName(_ *v1.Pod) (CgroupName, string) {
 	return m.cgroupRoot, m.cgroupRoot.ToCgroupfs()
+}
+
+func (m *podContainerManagerNoop) GetPodCgroupCpuLimit(_ *v1.Pod) (int64, uint64, uint64, error) {
+	return 0, 0, 0, nil
+}
+
+func (m *podContainerManagerNoop) GetPodCgroupMemoryLimit(_ *v1.Pod) (uint64, error) {
+	return 0, nil
+}
+
+func (m *podContainerManagerNoop) Update(_ *v1.Pod, _ []string) error {
+	return nil
 }
 
 func (m *podContainerManagerNoop) GetPodContainerNameForDriver(_ *v1.Pod) string {

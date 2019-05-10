@@ -34,6 +34,18 @@ func (m *podContainerManagerStub) EnsureExists(_ *v1.Pod) error {
 	return nil
 }
 
+func (m *podContainerManagerStub) GetPodCgroupCpuLimit(_ *v1.Pod) (int64, uint64, uint64, error) {
+	return 0, 0, 0, nil
+}
+
+func (m *podContainerManagerStub) GetPodCgroupMemoryLimit(_ *v1.Pod) (uint64, error) {
+	return 0, nil
+}
+
+func (m *podContainerManagerStub) Update(_ *v1.Pod, _ []string) error {
+	return nil
+}
+
 func (m *podContainerManagerStub) GetPodContainerName(_ *v1.Pod) (CgroupName, string) {
 	return nil, ""
 }

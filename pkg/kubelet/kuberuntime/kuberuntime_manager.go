@@ -113,6 +113,9 @@ type kubeGenericRuntimeManager struct {
 	// The directory path for seccomp profiles.
 	seccompProfileRoot string
 
+	// Container resource manager.
+	containerManager cm.ContainerManager
+
 	// Internal lifecycle event handlers for container resource management.
 	internalLifecycle cm.InternalContainerLifecycle
 
@@ -150,7 +153,7 @@ func NewKubeGenericRuntimeManager(
 	cpuCFSQuota bool,
 	runtimeService internalapi.RuntimeService,
 	imageService internalapi.ImageManagerService,
-	internalLifecycle cm.InternalContainerLifecycle,
+	containerManager cm.ContainerManager,
 	legacyLogProvider LegacyLogProvider,
 ) (KubeGenericRuntime, error) {
 	kubeRuntimeManager := &kubeGenericRuntimeManager{
@@ -165,7 +168,8 @@ func NewKubeGenericRuntimeManager(
 		runtimeService:      newInstrumentedRuntimeService(runtimeService),
 		imageService:        newInstrumentedImageManagerService(imageService),
 		keyring:             credentialprovider.NewDockerKeyring(),
-		internalLifecycle:   internalLifecycle,
+		containerManager:    containerManager,
+		internalLifecycle:   containerManager.InternalContainerLifecycle(),
 		legacyLogProvider:   legacyLogProvider,
 	}
 
@@ -758,7 +762,41 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 	}
 
 	// Step 7: For containers in podContainerChanges.ContainersToUpdate list, invoke UpdateContainerResources
-	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) && len(podContainerChanges.ContainersToUpdate) > 0 {
+		pcm := m.containerManager.NewPodContainerManager()
+
+		cgCpuQuota, _, _, err1 := pcm.GetPodCgroupCpuLimit(pod)
+		if err1 != nil {
+			glog.Errorf("GetPodCgroupCpuLimit for pod %s failed: %v", pod.Name, err1)
+			return
+		}
+		cgMemoryLimit, err2 := pcm.GetPodCgroupMemoryLimit(pod)
+		if err2 != nil {
+			glog.Errorf("GetPodCgroupMemoryLimit for pod %s failed: %v", pod.Name, err2)
+			return
+		}
+		podResourceConfig := cm.ResourceConfigForPod(pod, true)
+
+		// TODO:
+		//  1. Split CPU and memory updates into separate operations.
+		//  2. For multiple containers, Sort to perform decreases before increases
+		//  3. For net-increase, update pod cgroup first
+		//  4. For net-decrease, update pod cgroup at the end
+
+		if *podResourceConfig.CpuQuota > cgCpuQuota {
+			if err := pcm.Update(pod, []string{"memory"}); err!= nil {
+				glog.Errorf("Update Cgroup CPU limits for pod %s failed: %v", pod.Name, err)
+				return
+			}
+		}
+		//TODO: GetStats should return int64 intead of uint64 - fix libcontainer
+		if *podResourceConfig.Memory > int64(cgMemoryLimit) {
+			if err := pcm.Update(pod, []string{"cpu"}); err != nil {
+				glog.Errorf("Update Cgroup memory limits for pod %s failed: %v", pod.Name, err)
+				return
+			}
+		}
+
 		for containerID, containerInfo := range podContainerChanges.ContainersToUpdate {
 			if err := m.updateContainerResources(pod, containerID, containerInfo.name, containerInfo.container.Resources); err != nil {
 				glog.Errorf("updateContainerResources %q(id=%q) for pod %q failed: %v", containerInfo.name, containerID, format.Pod(pod), err)
@@ -767,6 +805,11 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStat
 			// UpdateContainerResources successful, update containerStatus.Hash
 			containerStatus := podStatus.FindContainerStatusByName(containerInfo.container.Name)
 			containerStatus.Hash = kubecontainer.HashContainer(containerInfo.container)
+		}
+
+		if err := pcm.Update(pod, nil); err != nil {
+			glog.Errorf("Update Cgroup limits for pod %s failed: %v", pod.Name, err)
+			return
 		}
 	}
 
