@@ -28,9 +28,19 @@ type CpuUsage struct {
 	UsageInUsermode uint64 `json:"usage_in_usermode"`
 }
 
+type CpuLimits struct {
+	// CPU shares (relative weight vs. other containers)
+	CpuShares uint64 `json:"cpu_shares"`
+	// CPU hardcap limit (in usecs). Allowed cpu time in a given period.
+	CpuQuota int64 `json:"cpu_quota"`
+	// CPU period to be used for hardcapping (in usecs). 0 to use system default.
+	CpuPeriod uint64 `json:"cpu_period"`
+}
+
 type CpuStats struct {
 	CpuUsage       CpuUsage       `json:"cpu_usage,omitempty"`
 	ThrottlingData ThrottlingData `json:"throttling_data,omitempty"`
+	CpuLimits      CpuLimits      `json:"cpu_limits,omitempty"`
 }
 
 type MemoryData struct {

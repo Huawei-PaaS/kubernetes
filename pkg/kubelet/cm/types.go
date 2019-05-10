@@ -19,6 +19,7 @@ package cm
 import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"github.com/opencontainers/runc/libcontainer/cgroups"
 )
 
 // ResourceConfig holds information about all the supported cgroup resource parameters.
@@ -77,7 +78,7 @@ type CgroupManager interface {
 	// Destroy the cgroup.
 	Destroy(*CgroupConfig) error
 	// Update cgroup configuration.
-	Update(*CgroupConfig) error
+	Update(*CgroupConfig, []string) error
 	// Exists checks if the cgroup already exists
 	Exists(name CgroupName) bool
 	// Name returns the literal cgroupfs name on the host after any driver specific conversions.
@@ -94,6 +95,8 @@ type CgroupManager interface {
 	ReduceCPULimits(cgroupName CgroupName) error
 	// GetResourceStats returns statistics of the specified cgroup as read from the cgroup fs.
 	GetResourceStats(name CgroupName) (*ResourceStats, error)
+	// GetCgroupStats returns statistics of the specified cgroup as read from the cgroup fs.
+	GetCgroupStats(name CgroupName) (*cgroups.Stats, error)
 }
 
 // QOSContainersInfo stores the names of containers per qos
@@ -117,6 +120,15 @@ type PodContainerManager interface {
 
 	// Exists returns true if the pod cgroup exists.
 	Exists(*v1.Pod) bool
+
+	// Get current values of cpu.cfs_quota_us, cpu.cfs_period_us, cpu.shares for Pod Cgroup
+	GetPodCgroupCpuLimit(*v1.Pod) (int64, uint64, uint64, error)
+
+	// Get current values of memory.limit_in_bytes for Pod Cgroup
+	GetPodCgroupMemoryLimit(*v1.Pod) (uint64, error)
+
+	// Update takes a pod as argument, and updates the Cgroup limits for the pod.
+	Update(*v1.Pod, []string) error
 
 	// Destroy takes a pod Cgroup name as argument and destroys the pod's container.
 	Destroy(name CgroupName) error

@@ -119,7 +119,7 @@ func (m *qosContainerManagerImpl) Start(getNodeAllocatable func() v1.ResourceLis
 			}
 		} else {
 			// to ensure we actually have the right state, we update the config on startup
-			if err := cm.Update(containerConfig); err != nil {
+			if err := cm.Update(containerConfig, nil); err != nil {
 				return fmt.Errorf("failed to update top level %v QOS cgroup : %v", qosClass, err)
 			}
 		}
@@ -306,7 +306,7 @@ func (m *qosContainerManagerImpl) UpdateCgroups() error {
 
 		updateSuccess := true
 		for _, config := range qosConfigs {
-			err := m.cgroupManager.Update(config)
+			err := m.cgroupManager.Update(config, nil)
 			if err != nil {
 				updateSuccess = false
 			}
@@ -328,7 +328,7 @@ func (m *qosContainerManagerImpl) UpdateCgroups() error {
 	}
 
 	for _, config := range qosConfigs {
-		err := m.cgroupManager.Update(config)
+		err := m.cgroupManager.Update(config, nil)
 		if err != nil {
 			glog.Errorf("[ContainerManager]: Failed to update QoS cgroup configuration")
 			return err

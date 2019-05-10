@@ -121,5 +121,22 @@ func (s *CpuGroup) GetStats(path string, stats *cgroups.Stats) error {
 			stats.CpuStats.ThrottlingData.ThrottledTime = v
 		}
 	}
+
+	value, err := getCgroupParamUint(path, "cpu.cfs_quota_us")
+	if err != nil {
+		return err
+	}
+	stats.CpuStats.CpuLimits.CpuQuota = int64(value)
+	value, err = getCgroupParamUint(path, "cpu.cfs_period_us")
+	if err != nil {
+		return err
+	}
+	stats.CpuStats.CpuLimits.CpuPeriod = value
+	value, err = getCgroupParamUint(path, "cpu.shares")
+	if err != nil {
+		return err
+	}
+	stats.CpuStats.CpuLimits.CpuShares = value
+
 	return nil
 }

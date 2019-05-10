@@ -92,7 +92,7 @@ func (cm *containerManagerImpl) enforceNodeAllocatableCgroups() error {
 	if len(cm.cgroupRoot) > 0 {
 		go func() {
 			for {
-				err := cm.cgroupManager.Update(cgroupConfig)
+				err := cm.cgroupManager.Update(cgroupConfig, nil)
 				if err == nil {
 					cm.recorder.Event(nodeRef, v1.EventTypeNormal, events.SuccessfulNodeAllocatableEnforcement, "Updated Node Allocatable limit across pods")
 					return
@@ -135,7 +135,7 @@ func enforceExistingCgroup(cgroupManager CgroupManager, cName CgroupName, rl v1.
 	if !cgroupManager.Exists(cgroupConfig.Name) {
 		return fmt.Errorf("%q cgroup does not exist", cgroupConfig.Name)
 	}
-	if err := cgroupManager.Update(cgroupConfig); err != nil {
+	if err := cgroupManager.Update(cgroupConfig, nil); err != nil {
 		return err
 	}
 	return nil

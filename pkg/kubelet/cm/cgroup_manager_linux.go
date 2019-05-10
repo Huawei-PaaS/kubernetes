@@ -336,8 +336,19 @@ func getSupportedSubsystems() map[subsystem]bool {
 // We would like to skip setting any values on the device cgroup in this case
 // but this is not possible with libcontainers Set() method
 // See https://github.com/opencontainers/runc/issues/932
-func setSupportedSubsystems(cgroupConfig *libcontainerconfigs.Cgroup) error {
+func setSupportedSubsystems(cgroupConfig *libcontainerconfigs.Cgroup, skipSubsystems []string) error {
 	for sys, required := range getSupportedSubsystems() {
+		skip := false
+		for _, skipSubsys := range skipSubsystems {
+			if sys.Name() == skipSubsys {
+				glog.V(6).Infof("Skipping sys.Set() for subsystem: %v", sys.Name())
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
 		if _, ok := cgroupConfig.Paths[sys.Name()]; !ok {
 			if required {
 				return fmt.Errorf("Failed to find subsystem mount for required subsystem: %v", sys.Name())
@@ -398,7 +409,7 @@ func (m *cgroupManagerImpl) toResources(resourceConfig *ResourceConfig) *libcont
 }
 
 // Update updates the cgroup with the specified Cgroup Configuration
-func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
+func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig, skipSubsystems []string) error {
 	start := time.Now()
 	defer func() {
 		metrics.CgroupManagerLatency.WithLabelValues("update").Observe(metrics.SinceInMicroseconds(start))
@@ -430,7 +441,7 @@ func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
 		libcontainerCgroupConfig.Resources.OomKillDisable = cgroupConfig.ResourceParameters.OomKillDisable
 	}
 
-	if err := setSupportedSubsystems(libcontainerCgroupConfig); err != nil {
+	if err := setSupportedSubsystems(libcontainerCgroupConfig, skipSubsystems); err != nil {
 		return fmt.Errorf("failed to set supported cgroup subsystems for cgroup %v: %v", cgroupConfig.Name, err)
 	}
 	return nil
@@ -460,6 +471,10 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
 		libcontainerCgroupConfig.PidsLimit = *cgroupConfig.ResourceParameters.PodPidsLimit
 	}
 
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.VerticalScaling) {
+		libcontainerCgroupConfig.Resources.OomKillDisable = cgroupConfig.ResourceParameters.OomKillDisable
+	}
+
 	// get the manager with the specified cgroup configuration
 	manager, err := m.adapter.newManager(libcontainerCgroupConfig, nil)
 	if err != nil {
@@ -478,7 +493,7 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
 
 	// it may confuse why we call set after we do apply, but the issue is that runc
 	// follows a similar pattern.  it's needed to ensure cpu quota is set properly.
-	m.Update(cgroupConfig)
+	m.Update(cgroupConfig, nil)
 
 	return nil
 }
@@ -544,7 +559,7 @@ func (m *cgroupManagerImpl) ReduceCPULimits(cgroupName CgroupName) error {
 		Name:               cgroupName,
 		ResourceParameters: resources,
 	}
-	return m.Update(containerConfig)
+	return m.Update(containerConfig, nil)
 }
 
 func getStatsSupportedSubsystems(cgroupPaths map[string]string) (*libcontainercgroups.Stats, error) {
@@ -581,4 +596,10 @@ func (m *cgroupManagerImpl) GetResourceStats(name CgroupName) (*ResourceStats, e
 		return nil, fmt.Errorf("failed to get stats supported cgroup subsystems for cgroup %v: %v", name, err)
 	}
 	return toResourceStats(stats), nil
+}
+
+// GetCgroupStats returns statistics of the specified cgroup as read from the cgroup fs.
+func (m *cgroupManagerImpl) GetCgroupStats(name CgroupName) (*libcontainercgroups.Stats, error) {
+	cgroupPaths := m.buildCgroupPaths(name)
+	return getStatsSupportedSubsystems(cgroupPaths)
 }

@@ -672,7 +672,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		kubeCfg.CPUCFSQuota,
 		runtimeService,
 		imageService,
-		kubeDeps.ContainerManager.InternalContainerLifecycle(),
+		kubeDeps.ContainerManager,
 		legacyLogProvider,
 	)
 	if err != nil {
@@ -1565,24 +1565,9 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 				if err := kl.containerManager.UpdateQOSCgroups(); err != nil {
 					glog.V(2).Infof("Failed to update QoS cgroups while syncing pod: %v", err)
 				}
-				if !utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
-					// create or update cgroup settings based on pod resource spec
-					if err := pcm.EnsureExists(pod); err != nil {
-						kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
-						return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
-					}
-
-				}
-			}
-
-			if utilfeature.DefaultFeatureGate.Enabled(features.VerticalScaling) {
-				// create or update cgroup settings based on pod resource spec
 				if err := pcm.EnsureExists(pod); err != nil {
 					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
 					return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
-				}
-				if err := kl.containerManager.UpdateQOSCgroups(); err != nil {
-					glog.V(2).Infof("Failed to update QoS cgroups while syncing pod: %v", err)
 				}
 			}
 		}
