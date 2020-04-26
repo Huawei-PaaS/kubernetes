@@ -21,8 +21,10 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/policy"
+	"k8s.io/kubernetes/pkg/features"
 	psputil "k8s.io/kubernetes/pkg/security/podsecuritypolicy/util"
 	"k8s.io/kubernetes/pkg/securitycontext"
 )
@@ -270,6 +272,24 @@ func (s *simpleProvider) ValidatePod(pod *api.Pod, fldPath *field.Path) field.Er
 					allErrs = append(allErrs,
 						field.Invalid(fldPath.Child("volumes").Index(i).Child("driver"), driver,
 							"Flexvolume driver is not allowed to be used"))
+				}
+			}
+
+			if fsType == policy.CSI && utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
+				if len(s.psp.Spec.AllowedCSIDrivers) > 0 {
+					found := false
+					driver := v.CSI.Driver
+					for _, allowedCSIDriver := range s.psp.Spec.AllowedCSIDrivers {
+						if driver == allowedCSIDriver.Name {
+							found = true
+							break
+						}
+					}
+					if !found {
+						allErrs = append(allErrs,
+							field.Invalid(field.NewPath("spec", "volumes").Index(i).Child("csi", "driver"), driver,
+								"Inline CSI driver is not allowed to be used"))
+					}
 				}
 			}
 		}

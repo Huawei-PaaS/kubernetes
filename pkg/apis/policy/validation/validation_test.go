@@ -371,6 +371,10 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 	nonEmptyFlexVolumes := validPSP()
 	nonEmptyFlexVolumes.Spec.AllowedFlexVolumes = []policy.AllowedFlexVolume{{Driver: "example/driver"}}
 
+	allowedCSIDriverPSP := validPSP()
+	allowedCSIDriverPSP.Spec.Volumes = []policy.FSType{policy.CSI}
+	allowedCSIDriverPSP.Spec.AllowedCSIDrivers = []policy.AllowedCSIDriver{{}}
+
 	type testCase struct {
 		psp         *policy.PodSecurityPolicy
 		errorType   field.ErrorType
@@ -615,6 +619,15 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 	flexvolumeWhenAllVolumesAllowed.Spec.AllowedFlexVolumes = []policy.AllowedFlexVolume{
 		{Driver: "example/driver2"},
 	}
+
+	allowedCSIDriversWithCSIFsType := validPSP()
+	allowedCSIDriversWithCSIFsType.Spec.Volumes = []policy.FSType{policy.CSI}
+	allowedCSIDriversWithCSIFsType.Spec.AllowedCSIDrivers = []policy.AllowedCSIDriver{{Name: "foo"}}
+
+	allowedCSIDriversWithAllFsTypes := validPSP()
+	allowedCSIDriversWithAllFsTypes.Spec.Volumes = []policy.FSType{policy.All}
+	allowedCSIDriversWithAllFsTypes.Spec.AllowedCSIDrivers = []policy.AllowedCSIDriver{{Name: "bar"}}
+
 	successCases := map[string]struct {
 		psp *policy.PodSecurityPolicy
 	}{

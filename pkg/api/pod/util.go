@@ -94,6 +94,10 @@ func VisitPodSecretNames(pod *api.Pod, visitor Visitor) bool {
 			if source.StorageOS.SecretRef != nil && !visitor(source.StorageOS.SecretRef.Name) {
 				return false
 			}
+		case source.CSI != nil:
+			if source.CSI.NodePublishSecretRef != nil && !visitor(source.CSI.NodePublishSecretRef.Name) {
+				return false
+			}
 		}
 	}
 	return true
@@ -262,6 +266,8 @@ func DropDisabledAlphaFields(podSpec *api.PodSpec) {
 	DropDisabledVolumeDevicesAlphaFields(podSpec)
 
 	DropDisabledRunAsGroupField(podSpec)
+
+	DropDisabledCSIVolumeSourceAlphaFields(podSpec)
 }
 
 // DropDisabledRunAsGroupField removes disabled fields from PodSpec related
@@ -305,4 +311,27 @@ func DropDisabledVolumeDevicesAlphaFields(podSpec *api.PodSpec) {
 			podSpec.InitContainers[i].VolumeDevices = nil
 		}
 	}
+}
+
+// DropDisabledCSIVolumeSourceAlphaFields removes disabled alpha fields from []CSIVolumeSource.
+// This should be called from PrepareForCreate/PrepareForUpdate for all pod specs resources containing a CSIVolumeSource
+func DropDisabledCSIVolumeSourceAlphaFields(podSpec *api.PodSpec) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) && !csiInUse(podSpec) {
+		for i := range podSpec.Volumes {
+			podSpec.Volumes[i].CSI = nil
+		}
+	}
+}
+
+// csiInUse returns true if any pod's spec include inline CSI volumes.
+func csiInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	for i := range podSpec.Volumes {
+		if podSpec.Volumes[i].CSI != nil {
+			return true
+		}
+	}
+	return false
 }
