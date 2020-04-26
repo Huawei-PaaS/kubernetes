@@ -64,6 +64,7 @@ func (c *fakeCsiDriverClient) NodePublishVolume(
 	req := &csipb.NodePublishVolumeRequest{
 		VolumeId:           volID,
 		TargetPath:         targetPath,
+		StagingTargetPath:  stagingTargetPath,
 		Readonly:           readOnly,
 		PublishInfo:        volumeInfo,
 		VolumeAttributes:   volumeAttribs,

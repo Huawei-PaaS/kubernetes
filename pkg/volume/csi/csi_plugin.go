@@ -57,6 +57,12 @@ type csiPlugin struct {
 	blockEnabled bool
 }
 
+//TODO (vladimirvivien) add this type to storage api
+type driverMode string
+
+const persistentDriverMode driverMode = "persistent"
+const ephemeralDriverMode driverMode = "ephemeral"
+
 // ProbeVolumePlugins returns implemented plugins
 func ProbeVolumePlugins() []volume.VolumePlugin {
 	p := &csiPlugin{
@@ -152,7 +158,7 @@ func (p *csiPlugin) GetPluginName() string {
 // GetvolumeName returns a concatenated string of CSIVolumeSource.Driver<volNameSe>CSIVolumeSource.VolumeHandle
 // That string value is used in Detach() to extract driver name and volumeName.
 func (p *csiPlugin) GetVolumeName(spec *volume.Spec) (string, error) {
-	csi, err := getCSISourceFromSpec(spec)
+	csi, err := getPVSourceFromSpec(spec)
 	if err != nil {
 		glog.Error(log("plugin.GetVolumeName failed to extract volume source from spec: %v", err))
 		return "", err
@@ -165,6 +171,14 @@ func (p *csiPlugin) GetVolumeName(spec *volume.Spec) (string, error) {
 func (p *csiPlugin) CanSupport(spec *volume.Spec) bool {
 	// TODO (vladimirvivien) CanSupport should also take into account
 	// the availability/registration of specified Driver in the volume source
+	if spec == nil {
+		return false
+	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
+		return (spec.PersistentVolume != nil && spec.PersistentVolume.Spec.CSI != nil) ||
+			(spec.Volume != nil && spec.Volume.CSI != nil)
+	}
+
 	return spec.PersistentVolume != nil && spec.PersistentVolume.Spec.CSI != nil
 }
 
@@ -176,11 +190,32 @@ func (p *csiPlugin) NewMounter(
 	spec *volume.Spec,
 	pod *api.Pod,
 	_ volume.VolumeOptions) (volume.Mounter, error) {
-	pvSource, err := getCSISourceFromSpec(spec)
+	volSrc, pvSrc, err := getSourceFromSpec(spec)
 	if err != nil {
 		return nil, err
 	}
-	readOnly, err := getReadOnlyFromSpec(spec)
+	var (
+		driverName   string
+		volumeHandle string
+		readOnly     bool
+	)
+
+	switch {
+	case volSrc != nil && utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume):
+		volumeHandle = makeVolumeHandle(string(pod.UID), spec.Name())
+		driverName = volSrc.Driver
+		if volSrc.ReadOnly != nil {
+			readOnly = *volSrc.ReadOnly
+		}
+	case pvSrc != nil:
+		driverName = pvSrc.Driver
+		volumeHandle = pvSrc.VolumeHandle
+		readOnly = spec.ReadOnly
+	default:
+		return nil, fmt.Errorf("volume source not found in volume.Spec")
+	}
+
+	driverMode, err := p.getDriverMode(spec)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +226,7 @@ func (p *csiPlugin) NewMounter(
 		return nil, errors.New("failed to get a Kubernetes client")
 	}
 
-	csi := newCsiDriverClient(pvSource.Driver)
+	csi := newCsiDriverClient(driverName)
 
 	mounter := &csiMountMgr{
 		plugin:       p,
@@ -199,8 +234,9 @@ func (p *csiPlugin) NewMounter(
 		spec:         spec,
 		pod:          pod,
 		podUID:       pod.UID,
-		driverName:   pvSource.Driver,
-		volumeID:     pvSource.VolumeHandle,
+		driverName:   driverName,
+		driverMode:   driverMode,
+		volumeID:     volumeHandle,
 		specVolumeID: spec.Name(),
 		csiClient:    csi,
 		readOnly:     readOnly,
@@ -218,13 +254,14 @@ func (p *csiPlugin) NewMounter(
 
 	// persist volume info data for teardown
 	node := string(p.host.GetNodeName())
-	attachID := getAttachmentName(pvSource.VolumeHandle, pvSource.Driver, node)
+	attachID := getAttachmentName(volumeHandle, driverName, node)
 	volData := map[string]string{
 		volDataKey.specVolID:    spec.Name(),
-		volDataKey.volHandle:    pvSource.VolumeHandle,
-		volDataKey.driverName:   pvSource.Driver,
+		volDataKey.volHandle:    volumeHandle,
+		volDataKey.driverName:   driverName,
 		volDataKey.nodeName:     node,
 		volDataKey.attachmentID: attachID,
+		volDataKey.driverMode:   string(driverMode),
 	}
 
 	if err := saveVolumeData(dataDir, volDataFileName, volData); err != nil {
@@ -276,21 +313,57 @@ func (p *csiPlugin) ConstructVolumeSpec(volumeName, mountPath string) (*volume.S
 
 	glog.V(4).Info(log("plugin.ConstructVolumeSpec extracted [%#v]", volData))
 
+	var spec *volume.Spec
+	inlineEnabled := utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume)
+
+	if inlineEnabled {
+		mode := driverMode(volData[volDataKey.driverMode])
+		switch {
+		case mode == ephemeralDriverMode:
+			spec = p.constructVolSourceSpec(volData[volDataKey.specVolID], volData[volDataKey.driverName])
+
+		case mode == persistentDriverMode:
+			fallthrough
+		default:
+			spec = p.constructPVSourceSpec(volData[volDataKey.specVolID], volData[volDataKey.driverName], volData[volDataKey.volHandle])
+		}
+	} else {
+		spec = p.constructPVSourceSpec(volData[volDataKey.specVolID], volData[volDataKey.driverName], volData[volDataKey.volHandle])
+	}
+
+	return spec, nil
+}
+
+// constructVolSourceSpec constructs volume.Spec with CSIVolumeSource
+func (p *csiPlugin) constructVolSourceSpec(volSpecName, driverName string) *volume.Spec {
+	vol := &api.Volume{
+		Name: volSpecName,
+		VolumeSource: api.VolumeSource{
+			CSI: &api.CSIVolumeSource{
+				Driver: driverName,
+			},
+		},
+	}
+	return volume.NewSpecFromVolume(vol)
+}
+
+//constructPVSourceSpec constructs volume.Spec with CSIPersistentVolumeSource
+func (p *csiPlugin) constructPVSourceSpec(volSpecName, driverName, volumeHandle string) *volume.Spec {
 	pv := &api.PersistentVolume{
 		ObjectMeta: meta.ObjectMeta{
-			Name: volData[volDataKey.specVolID],
+			Name: volSpecName,
 		},
 		Spec: api.PersistentVolumeSpec{
 			PersistentVolumeSource: api.PersistentVolumeSource{
 				CSI: &api.CSIPersistentVolumeSource{
-					Driver:       volData[volDataKey.driverName],
-					VolumeHandle: volData[volDataKey.volHandle],
+					Driver:       driverName,
+					VolumeHandle: volumeHandle,
 				},
 			},
 		},
 	}
 
-	return volume.NewSpecFromPersistentVolume(pv, false), nil
+	return volume.NewSpecFromPersistentVolume(pv, false)
 }
 
 func (p *csiPlugin) SupportsMountOption() bool {
@@ -467,4 +540,24 @@ func (p *csiPlugin) ConstructBlockVolumeSpec(podUID types.UID, specVolName, mapP
 	}
 
 	return volume.NewSpecFromPersistentVolume(pv, false), nil
+}
+
+// getDriverMode returns the driver mode for the specified spec: {persistent|ephemeral}.
+// 1) If mode cannot be determined, it will default to "persistent".
+// 2) If Mode cannot be resolved to either {persistent | ephemeral}, an error is returned
+// See https://github.com/kubernetes/enhancements/blob/master/keps/sig-storage/20190122-csi-inline-volumes.md
+func (p *csiPlugin) getDriverMode(spec *volume.Spec) (driverMode, error) {
+	// TODO (vladimirvivien) ultimately, mode will be retrieved from CSIDriver.Spec.Mode.
+	// However, in alpha version, mode is determined by the volume source:
+	// 1) if volume.Spec.Volume.CSI != nil -> mode is ephemeral
+	// 2) if volume.Spec.PersistentVolume.Spec.CSI != nil -> persistent
+	volSrc, _, err := getSourceFromSpec(spec)
+	if err != nil {
+		return "", err
+	}
+
+	if volSrc != nil && utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
+		return ephemeralDriverMode, nil
+	}
+	return persistentDriverMode, nil
 }

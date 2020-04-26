@@ -638,7 +638,14 @@ func validateVolumeSource(source *core.VolumeSource, fldPath *field.Path, volNam
 			allErrs = append(allErrs, validateScaleIOVolumeSource(source.ScaleIO, fldPath.Child("scaleIO"))...)
 		}
 	}
-
+	if source.CSI != nil {
+		if numVolumes > 0 {
+			allErrs = append(allErrs, field.Forbidden(fldPath.Child("csi"), "may not specify more than 1 volume type"))
+		} else {
+			numVolumes++
+			allErrs = append(allErrs, validateCSIVolumeSource(source.CSI, fldPath.Child("csi"))...)
+		}
+	}
 	if numVolumes == 0 {
 		allErrs = append(allErrs, field.Required(fldPath, "must specify a volume type"))
 	}
@@ -1426,6 +1433,24 @@ func validateStorageOSPersistentVolumeSource(storageos *core.StorageOSPersistent
 	return allErrs
 }
 
+func ValidateCSIDriverName(driverName string, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if len(driverName) == 0 {
+		allErrs = append(allErrs, field.Required(fldPath, ""))
+	}
+
+	if len(driverName) > 63 {
+		allErrs = append(allErrs, field.TooLong(fldPath, driverName, 63))
+	}
+
+	if !csiDriverNameRexp.MatchString(driverName) {
+		allErrs = append(allErrs, field.Invalid(fldPath, driverName, validation.RegexError(csiDriverNameRexpErrMsg, csiDriverNameRexpFmt, "csi-hostpath")))
+	}
+
+	return allErrs
+}
+
 func validateCSIPersistentVolumeSource(csi *core.CSIPersistentVolumeSource, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
@@ -1433,17 +1458,7 @@ func validateCSIPersistentVolumeSource(csi *core.CSIPersistentVolumeSource, fldP
 		allErrs = append(allErrs, field.Forbidden(fldPath, "CSIPersistentVolume disabled by feature-gate"))
 	}
 
-	if len(csi.Driver) == 0 {
-		allErrs = append(allErrs, field.Required(fldPath.Child("driver"), ""))
-	}
-
-	if len(csi.Driver) > 63 {
-		allErrs = append(allErrs, field.TooLong(fldPath.Child("driver"), csi.Driver, 63))
-	}
-
-	if !csiDriverNameRexp.MatchString(csi.Driver) {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("driver"), csi.Driver, validation.RegexError(csiDriverNameRexpErrMsg, csiDriverNameRexpFmt, "csi-hostpath")))
-	}
+	allErrs = append(allErrs, ValidateCSIDriverName(csi.Driver, fldPath.Child("driver"))...)
 
 	if len(csi.VolumeHandle) == 0 {
 		allErrs = append(allErrs, field.Required(fldPath.Child("volumeHandle"), ""))
@@ -1475,19 +1490,6 @@ func validateCSIPersistentVolumeSource(csi *core.CSIPersistentVolumeSource, fldP
 		}
 	}
 
-	if csi.NodeStageSecretRef != nil {
-		if len(csi.NodeStageSecretRef.Name) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath.Child("nodeStageSecretRef", "name"), ""))
-		} else {
-			allErrs = append(allErrs, ValidateDNS1123Label(csi.NodeStageSecretRef.Name, fldPath.Child("name"))...)
-		}
-		if len(csi.NodeStageSecretRef.Namespace) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath.Child("nodeStageSecretRef", "namespace"), ""))
-		} else {
-			allErrs = append(allErrs, ValidateDNS1123Label(csi.NodeStageSecretRef.Namespace, fldPath.Child("namespace"))...)
-		}
-	}
-
 	return allErrs
 }
 
@@ -1500,6 +1502,22 @@ var supportedAccessModes = sets.NewString(string(core.ReadWriteOnce), string(cor
 var supportedReclaimPolicy = sets.NewString(string(core.PersistentVolumeReclaimDelete), string(core.PersistentVolumeReclaimRecycle), string(core.PersistentVolumeReclaimRetain))
 
 var supportedVolumeModes = sets.NewString(string(core.PersistentVolumeBlock), string(core.PersistentVolumeFilesystem))
+
+func validateCSIVolumeSource(csi *core.CSIVolumeSource, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	allErrs = append(allErrs, ValidateCSIDriverName(csi.Driver, fldPath.Child("driver"))...)
+
+	if csi.NodePublishSecretRef != nil {
+		if len(csi.NodePublishSecretRef.Name) == 0 {
+			allErrs = append(allErrs, field.Required(fldPath.Child("nodePublishSecretRef ", "name"), ""))
+		} else {
+			for _, msg := range ValidateSecretName(csi.NodePublishSecretRef.Name, false) {
+				allErrs = append(allErrs, field.Invalid(fldPath.Child("name"), csi.NodePublishSecretRef.Name, msg))
+			}
+		}
+	}
+	return allErrs
+}
 
 func ValidatePersistentVolume(pv *core.PersistentVolume) field.ErrorList {
 	metaPath := field.NewPath("metadata")

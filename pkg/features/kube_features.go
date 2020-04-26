@@ -343,6 +343,12 @@ const (
 	//
 	// Enables CSI to use raw block storage volumes
 	CSIBlockVolume utilfeature.Feature = "CSIBlockVolume"
+
+	// owner: @vladimirvivien
+	// alpha: v1.14
+	//
+	// Enables CSI Inline volumes support for pods
+	CSIInlineVolume utilfeature.Feature = "CSIInlineVolume"
 )
 
 func init() {
@@ -353,8 +359,8 @@ func init() {
 // To add a new feature, define a key for it above and add it here. The features will be
 // available throughout Kubernetes binaries.
 var defaultKubernetesFeatureGates = map[utilfeature.Feature]utilfeature.FeatureSpec{
-	AppArmor:                                    {Default: true, PreRelease: utilfeature.Beta},
-	DynamicKubeletConfig:                        {Default: true, PreRelease: utilfeature.Beta},
+	AppArmor:             {Default: true, PreRelease: utilfeature.Beta},
+	DynamicKubeletConfig: {Default: true, PreRelease: utilfeature.Beta},
 	ExperimentalHostUserNamespaceDefaultingGate: {Default: false, PreRelease: utilfeature.Beta},
 	ExperimentalCriticalPodAnnotation:           {Default: false, PreRelease: utilfeature.Alpha},
 	DevicePlugins:                               {Default: true, PreRelease: utilfeature.Beta},
@@ -401,7 +407,7 @@ var defaultKubernetesFeatureGates = map[utilfeature.Feature]utilfeature.FeatureS
 	KubeletPluginsWatcher:                       {Default: false, PreRelease: utilfeature.Alpha},
 	ResourceQuotaScopeSelectors:                 {Default: false, PreRelease: utilfeature.Alpha},
 	CSIBlockVolume:                              {Default: false, PreRelease: utilfeature.Alpha},
-
+	CSIInlineVolume:                             {Default: false, PreRelease: utilfeature.Alpha},
 	// inherited features from generic apiserver, relisted here to get a conflict if it is changed
 	// unintentionally on either side:
 	genericfeatures.StreamingProxyRedirects: {Default: true, PreRelease: utilfeature.Beta},

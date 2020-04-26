@@ -164,6 +164,9 @@ func ProbeControllerVolumePlugins(cloud cloudprovider.Interface, config componen
 	allPlugins = append(allPlugins, azure_dd.ProbeVolumePlugins()...)
 	allPlugins = append(allPlugins, photon_pd.ProbeVolumePlugins()...)
 
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
+		allPlugins = append(allPlugins, csi.ProbeVolumePlugins()...)
+	}
 	return allPlugins
 }
 

@@ -30,9 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/cloudprovider"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/util/io"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume/util/recyclerclient"
@@ -740,6 +742,9 @@ func (pm *VolumePluginMgr) FindAttachablePluginBySpec(spec *Spec) (AttachableVol
 		return nil, err
 	}
 	if attachableVolumePlugin, ok := volumePlugin.(AttachableVolumePlugin); ok {
+		if spec.Volume != nil && spec.Volume.CSI != nil && utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) {
+			return nil, nil
+		}
 		return attachableVolumePlugin, nil
 	}
 	return nil, nil
